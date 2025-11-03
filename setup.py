@@ -4,29 +4,29 @@ from PyQt5.QtWidgets import ( QApplication,
     QFormLayout, QMessageBox, QDialog, QDialogButtonBox, QGridLayout
 ) # Add QFont
 from PyQt5.QtCore import Qt, QTimer
-from config import secret_manager # Importujeme globálny secret_manager
+from config import secret_manager # Import the global secret_manager
 from PyQt5.QtGui import QIcon
 
 class PinDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Zadajte PIN")
+        self.setWindowTitle(self.tr("Enter PIN"))
         self.result = False
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
 
-        icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Uprav cestu, ak je to potrebné
+        icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Adjust path if necessary
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
  
         layout = QVBoxLayout()
         label = QLabel("PIN:")
         self.pin_entry = QLineEdit()
-        self.pin_entry.setFixedHeight(32) # Zväčšenie výšky políčka
+        self.pin_entry.setFixedHeight(32) # Increase field height
         self.pin_entry.setEchoMode(QLineEdit.Password)
         self.pin_entry.setAlignment(Qt.AlignLeft)
         layout.addWidget(label)
         layout.addWidget(self.pin_entry)
-        self.setMinimumWidth(350) # Nastavenie minimálnej šírky dialógu
+        self.setMinimumWidth(350) # Set minimum dialog width
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.check_pin)
@@ -53,38 +53,38 @@ class PinDialog(QDialog):
     def check_pin(self):
         self.auto_check_timer.stop()
         pin = self.pin_entry.text()
-        if secret_manager.decrypt_file(pin): #pouzivame globalny secret_manager
+        if secret_manager.decrypt_file(pin): # use the global secret_manager
             self.result = True
             self.accept()
         else:
-            QMessageBox.critical(self, "Chyba", "Nesprávny PIN!")
+            QMessageBox.critical(self, "Error", self.tr("Incorrect PIN!"))
             self.pin_entry.clear()
             self.pin_entry.setFocus()
 
 class NewPinDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Zadajte nový PIN")
+        self.setWindowTitle(self.tr("Enter New PIN"))
         self.result = None
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
 
-        icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Uprav cestu, ak je to potrebné
+        icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Adjust path if necessary
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
         layout = QFormLayout()
         self.new_pin_entry = QLineEdit()
-        self.new_pin_entry.setFixedHeight(32) # Zväčšenie výšky políčka
+        self.new_pin_entry.setFixedHeight(32) # Increase field height
         self.new_pin_entry.setEchoMode(QLineEdit.Password)
         self.new_pin_entry.setAlignment(Qt.AlignLeft)
         self.confirm_pin_entry = QLineEdit()
-        self.confirm_pin_entry.setFixedHeight(32) # Zväčšenie výšky políčka
+        self.confirm_pin_entry.setFixedHeight(32) # Increase field height
         self.confirm_pin_entry.setEchoMode(QLineEdit.Password)
         self.confirm_pin_entry.setAlignment(Qt.AlignLeft)
-        layout.addRow("Nový PIN:", self.new_pin_entry)
-        layout.addRow("Potvrďte PIN:", self.confirm_pin_entry)
+        layout.addRow(self.tr("New PIN:"), self.new_pin_entry)
+        layout.addRow(self.tr("Confirm PIN:"), self.confirm_pin_entry)
 
-        self.setMinimumWidth(450) # Nastavenie minimálnej šírky dialógu
+        self.setMinimumWidth(450) # Set minimum dialog width
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.check_pins)
@@ -101,22 +101,22 @@ class NewPinDialog(QDialog):
                 self.result = new_pin
                 self.accept()
             else:
-                QMessageBox.critical(self, "Chyba", "PIN musí mať aspoň 8 znakov!")
+                QMessageBox.critical(self, "Error", self.tr("PIN must be at least 8 characters long!"))
         else:
-            QMessageBox.critical(self, "Chyba", "PINy sa nezhodujú!")
+            QMessageBox.critical(self, "Error", self.tr("PINs do not match!"))
             self.new_pin_entry.clear()
             self.confirm_pin_entry.clear()
 
 class SecretSetupGUI(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Nastavenie Secretov")
+        self.setWindowTitle(self.tr("Secrets Setup"))
         self.secrets = {}
-        self.entries = {} # Zväčšenie okna
+        self.entries = {} # Window enlargement
         self.setFixedSize(800, 550)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
 
-        icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Uprav cestu, ak je to potrebné
+        icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Adjust path if necessary
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -144,8 +144,8 @@ class SecretSetupGUI(QWidget):
         for key, label_text in fields:
             label = QLabel(label_text)
             entry = QLineEdit()
-            entry.setFixedHeight(32) # Zväčšenie výšky políčok
-            entry.setMinimumWidth(500) # Úprava minimálnej šírky políčok
+            entry.setFixedHeight(32) # Increase field height
+            entry.setMinimumWidth(500) # Adjust minimum field width
             entry.setAlignment(Qt.AlignLeft)
             if key == "crypt_key":
                 entry.setEchoMode(QLineEdit.Password)
@@ -154,7 +154,7 @@ class SecretSetupGUI(QWidget):
             self.entries[key] = entry
             row += 1
 
-        self.save_button = QPushButton("Uložiť")
+        self.save_button = QPushButton(self.tr("Save"))
         self.save_button.clicked.connect(self.save_secrets)
         layout.addWidget(self.save_button)
 
@@ -181,10 +181,10 @@ class SecretSetupGUI(QWidget):
                 return
 
         if secret_manager.encrypt_and_save_file(secrets_to_save, pin):
-            QMessageBox.information(self, "Úspech", "Secrets boli úspešne uložené!")
+            QMessageBox.information(self, self.tr("Success"), self.tr("Secrets were saved successfully!"))
             self.close()
         else:
-            QMessageBox.critical(self, "Chyba", "Nepodarilo sa uložiť secrets!")
+            QMessageBox.critical(self, self.tr("Error"), self.tr("Failed to save secrets!"))
 
 def run_setup(app):
     gui = SecretSetupGUI()
@@ -196,8 +196,8 @@ def run_setup(app):
 def show_pin_dialog(app):
     pin_dialog = PinDialog()
     if pin_dialog.exec_() == QDialog.Rejected or not pin_dialog.result:
-        return False #vraciame False ak sa nepodarilo desifrovat
-    return True #vraciame True ak sa podarilo desifrovat
+        return False # return False if decryption failed
+    return True # return True if decryption succeeded
 
 if __name__ == "__main__":
     import sys
@@ -206,24 +206,24 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     default_font = QFont()
-    default_font.setPointSize(11) # Nastavenie väčšej veľkosti písma (napr. 11pt)
+    default_font.setPointSize(11) # Set a larger font size (e.g., 11pt)
     app.setFont(default_font)
 
-    # Pokus o načítanie a dešifrovanie existujúcich secretov, ak súbor existuje
+    # Attempt to load and decrypt existing secrets if the file exists
     if os.path.exists(secret_manager.properties_file):
-        print(f"INFO: Súbor '{secret_manager.properties_file}' existuje. Pokus o dešifrovanie...")
+        print(f"INFO: File '{secret_manager.properties_file}' exists. Attempting decryption...")
         if not show_pin_dialog(app):
-            # Ak dešifrovanie zlyhalo (nesprávny PIN alebo zrušené),
-            # secret_manager.secrets zostanú prázdne.
-            # GUI sa otvorí s prázdnymi poliami pre nové nastavenie.
+            # If decryption failed (incorrect PIN or canceled),
+            # secret_manager.secrets will remain empty.
+            # The GUI will open with empty fields for new setup.
             QMessageBox.warning(None, "Info",
-                                "Nepodarilo sa dešifrovať existujúce nastavenia alebo bola operácia zrušená. "
-                                "Môžete zadať nové nastavenia, ktoré prepíšu pôvodný súbor (ak existoval).")
+                                "Failed to decrypt existing settings or the operation was canceled. "
+                                "You can enter new settings, which will overwrite the original file (if it existed).")
         else:
-            print("INFO: Existujúce secrets boli úspešne dešifrované.")
+            print("INFO: Existing secrets were successfully decrypted.")
 
     setup_gui = SecretSetupGUI()
-    # load_secrets() načíta hodnoty z secret_manager.secrets (ak boli úspešne dešifrované)
+    # load_secrets() loads values from secret_manager.secrets (if they were successfully decrypted)
     setup_gui.load_secrets()
     setup_gui.show()
     sys.exit(app.exec_())

@@ -8,7 +8,7 @@ class ReportingView(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        header = QLabel(self.tr("Reporting")) # Použijeme self.tr pre budúce preklady
+        header = QLabel(self.tr("Reporting")) # We use self.tr for future translations
         header.setStyleSheet("font-size: 20px; font-weight: bold; margin-bottom: 10px;")
         layout.addWidget(header)
-        # Sem neskôr pridáš obsah pre reporting
+        # You will add content for reporting here later

@@ -3,7 +3,7 @@ import psycopg2.extras
 from config import secret_manager
 from typing import List
 from model import Club, Membership, Ecp, EcpRequest, Member # EcpRequest model might need photo_hash
-import datetime # Pridaný import
+import datetime # Added import
 class DatabaseManager:
     def __init__(self):
         self.connection_params = {
@@ -13,13 +13,13 @@ class DatabaseManager:
             "user": secret_manager.get_secret("db_user"),
             "password": secret_manager.get_secret("db_password")
         }
-        # Zabezpečí, že logovacia tabuľka existuje
+        # Ensures that the log table exists
         self._ensure_log_table_exists()
 
     def get_connection(self):
         return psycopg2.connect(**self.connection_params)
 
-    # ----- Logovanie -----
+    # ----- Logging -----
     def _ensure_log_table_exists(self):
         query = """
         CREATE TABLE IF NOT EXISTS db_logs (
@@ -48,7 +48,7 @@ class DatabaseManager:
                 cur.execute(query, (action, table_name, user, details))
                 conn.commit()
 
-    # ----- Low-level helper metódy -----
+    # ----- Low-level helper methods -----
     def _fetch_all(self, query, params=None):
         with self.get_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
@@ -67,7 +67,7 @@ class DatabaseManager:
                 cur.execute(query, params)
                 conn.commit()
 
-    # ----- Čítacie operácie (špecifické metódy) -----
+    # ----- Read operations (specific methods) -----
     def fetch_clubs(self) -> List[Club]:
         query = """
         SELECT c.club_id, c.club_name, c.street, c.city, c.zip_code, c.country, c.email, c.phone,
@@ -129,7 +129,7 @@ class DatabaseManager:
             )
         return None
 
-    # Rozdelené metódy pre načítanie člena
+    # Separated methods for loading a member
     def fetch_member_by_id(self, member_id: int) -> Member:
         query = """
         SELECT m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
@@ -289,7 +289,7 @@ class DatabaseManager:
             ))
         return members
 
-    # Rozdelené metódy pre klubové príslušnosti
+    # Separated methods for club affiliations
     def fetch_memberships_by_member(self, member_id: int) -> List[Membership]:
         query = """
         SELECT c.club_id, ca.member_id, c.club_name, c.president_id, ca.is_primary_club
@@ -390,8 +390,8 @@ class DatabaseManager:
         requests_list = []
         for row in rows:
             requests_list.append(EcpRequest(
-                # Načítame photo_hash z tabuľky ecp_records (aliased ako er)
-                # a approved_ecp_hash z tabuľky ecp_requests (aliased ako r)
+                # We load photo_hash from the ecp_records table (aliased as er)
+                # and approved_ecp_hash from the ecp_requests table (aliased as r)
                 request_id=row["request_id"],
                 member_id=row["member_id"],
                 photo_hash=row["photo_hash"], # Toto je hash fotky z ecp_records
@@ -410,7 +410,7 @@ class DatabaseManager:
         self._execute(query, params)
         self._log_action("DELETE", "notifications", f"Deleted notification with ID: {notification_id}")
 
-    # ----- Zápisové operácie (špecifické metódy) -----
+    # ----- Write operations (specific methods) -----
     def update_club(self, club: Club):
         query = """
         UPDATE clubs
@@ -587,7 +587,7 @@ class DatabaseManager:
             ecp.photo_hash,
             ecp.is_ecp_active,
             ecp.check_hash
-            # ecp.member_id -- Odstránené podľa požiadavky
+            # ecp.member_id -- Removed as per requirement
         )
         self._execute(query, params)
         self._log_action("INSERT", "ecp_records", f"Inserted eCP record: {ecp.__dict__}")
@@ -651,5 +651,5 @@ class DatabaseManager:
         self._execute(query, (photo_hash,))
         self._log_action("DELETE", "ecp_records", f"Deleted eCP record with photo_hash {photo_hash}")
 
-# Globálna inštancia, ak je potrebná
+# Global instance, if needed
 db_manager: DatabaseManager = None

@@ -10,7 +10,7 @@ import db
 from dialogs.club_management_dialog import ClubManagementDialog
 from model import Member, Club
 from dialogs.member_management_dialog import MemberManagementDialog 
-from utils import get_state_pixmap, _get_scaled_pixmap_from_cache, load_image_from_url, get_table_header_stylesheet, show_warning_message, show_info_message, show_success_message # Pridaný import
+from utils import get_state_pixmap, _get_scaled_pixmap_from_cache, load_image_from_url, get_table_header_stylesheet, show_warning_message, show_info_message, show_success_message # Added import
 
 MAX_MEMBERS_LIST_LOGO_WIDTH = 400
 MAX_MEMBERS_LIST_LOGO_HEIGHT = 100
@@ -21,32 +21,32 @@ class MembersListView(QWidget):
         self.parent_window = parent_window
         self.current_club: Club = None
         self.members: List[Member] = []
-        #self.table = QTableWidget() # Definujeme tabuľku ako atribút triedy
+        #self.table = QTableWidget() # We define the table as a class attribute
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # === Nová hlavička (informácie o klube + legenda) ===
+        # === New header (club information + legend) ===
         self.club_header_widget = QWidget()
         club_header_layout = QHBoxLayout(self.club_header_widget)
 
-        # Ľavá strana: klubové informácie a tlačidlo "Spravovať klub"
-        left_section_layout = QVBoxLayout() # Použijeme QVBoxLayout pre lepšie usporiadanie
+        # Left side: club information and "Manage Club" button
+        left_section_layout = QVBoxLayout() # We use QVBoxLayout for better arrangement
         
         self.club_details_label = QLabel(self.tr("Loading club information..."))
-        self.club_details_label.setStyleSheet("font-size: 14px; margin-bottom: 5px;") # Upravený štýl
+        self.club_details_label.setStyleSheet("font-size: 14px; margin-bottom: 5px;") # Adjusted style
         self.club_details_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         left_section_layout.addWidget(self.club_details_label)
         self.btn_manage_club = QPushButton(self.tr("Manage Club"))
         self.btn_manage_club.clicked.connect(self.manage_current_club)
-        self.btn_manage_club.setEnabled(False) # Pôvodne neaktívne
-        left_section_layout.addWidget(self.btn_manage_club, alignment=Qt.AlignLeft) # Zarovnanie tlačidla
+        self.btn_manage_club.setEnabled(False) # Initially inactive
+        left_section_layout.addWidget(self.btn_manage_club, alignment=Qt.AlignLeft) # Button alignment
         
-        # Stredná časť: Logo klubu
+        # Middle part: Club Logo
         self.club_logo_preview_label = QLabel(self.tr("No Logo"))
         self.club_logo_preview_label.setAlignment(Qt.AlignCenter)
-        self.club_logo_preview_label.setFixedSize(MAX_MEMBERS_LIST_LOGO_WIDTH, MAX_MEMBERS_LIST_LOGO_HEIGHT) # Predvolená veľkosť
+        self.club_logo_preview_label.setFixedSize(MAX_MEMBERS_LIST_LOGO_WIDTH, MAX_MEMBERS_LIST_LOGO_HEIGHT) # Default size
         #self.club_logo_preview_label.setStyleSheet("border: 1px solid #B0B0B0; background-color: #FFFFFF;")
 
         club_header_layout.addLayout(left_section_layout)
@@ -54,7 +54,7 @@ class MembersListView(QWidget):
         club_header_layout.addWidget(self.club_logo_preview_label) # logo
         club_header_layout.addStretch(1) 
         
-        # Pravá strana: legenda
+        # Right side: legend
         legend_widget = QWidget()
         legend_layout = QGridLayout(legend_widget)
         legend_layout.setContentsMargins(0, 0, 0, 0)
@@ -62,7 +62,7 @@ class MembersListView(QWidget):
         legend_layout.setHorizontalSpacing(20)
         
         IMG_SIZE = 18 # Veľkosť ikoniek v legende
-        FIX_SIZE = 18 # Fixná veľkosť QLabel pre ikonku
+        FIX_SIZE = 18 # Fixed size of QLabel for the icon
 
         legend_items = [
             ("caver_green.png", self.tr("Active")), ("caver_gray_inv.png", self.tr("Inactive")),
@@ -92,12 +92,12 @@ class MembersListView(QWidget):
             text_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             hbox.addWidget(text_label)
 
-            legend_layout.addLayout(hbox, i // 2, i % 2) # Usporiadanie do 2 stĺpcov
+            legend_layout.addLayout(hbox, i // 2, i % 2) # Arrangement in 2 columns
 
         
         club_header_layout.addWidget(legend_widget)
         layout.addWidget(self.club_header_widget)
-        # === Koniec novej hlavičky ===
+        # === End of new header ===
 
         self.table = QTableWidget()
         self.table.setColumnCount(9) 
@@ -124,12 +124,12 @@ class MembersListView(QWidget):
         header.setStyleSheet(get_table_header_stylesheet())
         self.table.setStyleSheet("QTableWidget { font-size: 8pt; }")
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers) # Zakázanie editácie
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers) # Disable editing
         self.table.setAlternatingRowColors(True)
 
         layout.addWidget(self.table)
 
-        # Tlačidlá pod tabuľkou
+        # Buttons below the table
         button_layout = QHBoxLayout()
         # Pridanie tlačidla "Mass Fee Update"
         btn_mass_fee_update = QPushButton(self.tr("Mass Fee Update"))
@@ -171,18 +171,18 @@ class MembersListView(QWidget):
         self.club_details_label.setStyleSheet("QTableWidget { font-size: 12pt; }")
         self.btn_manage_club.setEnabled(True)
 
-        # Načítanie a zobrazenie loga klubu
-        self.club_logo_preview_label.setPixmap(QPixmap()) # Vyčistiť predchádzajúce logo
+        # Load and display the club logo
+        self.club_logo_preview_label.setPixmap(QPixmap()) # Clear previous logo
         if club.logo_url:
             self.club_logo_preview_label.setText(self.tr("Loading logo..."))
             pixmap = load_image_from_url(club.logo_url, max_size=(MAX_MEMBERS_LIST_LOGO_WIDTH, MAX_MEMBERS_LIST_LOGO_HEIGHT))
             if pixmap:
                 self.club_logo_preview_label.setPixmap(pixmap)
-                self.club_logo_preview_label.setFixedSize(pixmap.size()) # Prispôsobiť veľkosť QLabel obrázku
+                self.club_logo_preview_label.setFixedSize(pixmap.size()) # Adjust QLabel size to the image
                 self.club_logo_preview_label.setText("")
             else:
                 self.club_logo_preview_label.setText(self.tr("Logo not found"))
-                self.club_logo_preview_label.setFixedSize(MAX_MEMBERS_LIST_LOGO_WIDTH, MAX_MEMBERS_LIST_LOGO_HEIGHT) # Reset na placeholder
+                self.club_logo_preview_label.setFixedSize(MAX_MEMBERS_LIST_LOGO_WIDTH, MAX_MEMBERS_LIST_LOGO_HEIGHT) # Reset to placeholder
         else:
             self.club_logo_preview_label.setText(self.tr("No Logo"))
             self.club_logo_preview_label.setFixedSize(MAX_MEMBERS_LIST_LOGO_WIDTH, MAX_MEMBERS_LIST_LOGO_HEIGHT) # Reset na placeholder
@@ -204,7 +204,7 @@ class MembersListView(QWidget):
             self.table.setItem(row, 1, QTableWidgetItem(member_obj.title_prefix))
             self.table.setItem(row, 2, QTableWidgetItem(f"{member_obj.first_name} {member_obj.last_name}"))
             self.table.setItem(row, 3, QTableWidgetItem(member_obj.title_suffix))
-            self.table.setItem(row, 4, QTableWidgetItem(str(member_obj.birth_date) if member_obj.birth_date else "")) # Použije property
+            self.table.setItem(row, 4, QTableWidgetItem(str(member_obj.birth_date) if member_obj.birth_date else "")) # Uses property
             address_parts = [
                 member_obj.street,
                 member_obj.city,
@@ -229,28 +229,28 @@ class MembersListView(QWidget):
         
         dlg = MemberManagementDialog(club=self.current_club, member=member, is_new=is_new, parent=self)
         if dlg.exec_() == QDialog.Accepted:
-            self.load_data_for_club(self.current_club) # Obnovenie zoznamu
+            self.load_data_for_club(self.current_club) # Refresh the list
 
     def open_club_management(self, club:Club):
         dlg = ClubManagementDialog(club=club, parent=self)
-        # Uložíme si výsledok dialógu
+        # We save the result of the dialog
         result = dlg.exec_()
 
-        # Ak bol dialóg akceptovaný (napr. používateľ klikol na "Uložiť")
+        # If the dialog was accepted (e.g., the user clicked "Save")
         if result == QDialog.Accepted:
             # Skontrolujeme, či klub spravovaný v dialógu je ten istý,
             # ktorý je aktuálne zobrazený v tomto MembersListView.
             if self.current_club and self.current_club.club_id == club.club_id:
-                # Načítame potenciálne aktualizované dáta klubu z databázy
+                # We load potentially updated club data from the database
                 updated_club_data = db.db_manager.fetch_club_by_id(club.club_id)
                 if updated_club_data:
-                    # Znovu načítame dáta pre klub, čím sa aktualizuje aj hlavička
+                    # We reload the data for the club, which also updates the header
                     self.load_data_for_club(updated_club_data)
                     # After successfully updating this view, also refresh the main clubs list view
                     if self.parent_window and hasattr(self.parent_window, 'clubs_list_view'):
                         self.parent_window.clubs_list_view.load_data()
                 else:
-                    # Tento prípad môže nastať, ak bol klub medzitým vymazaný (menej pravdepodobné z dialógu pre správu)
+                    # This case can occur if the club was deleted in the meantime (less likely from the management dialog)
                     show_warning_message(self.tr(f"Failed to load updated data for club ID: {club.club_id}."))
 
     def add_new_member(self):
@@ -274,6 +274,6 @@ class MembersListView(QWidget):
         if reply == QMessageBox.Yes:
             for index in selected_indexes:
                 member: Member = self.members[index.row()]
-                member.set_paid_fee() # Metóda set_paid_fee už rieši aktuálny rok a DB zápis
+                member.set_paid_fee() # The set_paid_fee method already handles the current year and DB write
             show_success_message(self.tr("Fees have been set for the selected members."))
-            self.load_data_for_club(self.current_club) # Obnovenie zoznamu
+            self.load_data_for_club(self.current_club) # Refresh the list

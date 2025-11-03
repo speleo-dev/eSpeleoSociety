@@ -3,7 +3,7 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QPixmap
 
 class NavigationPanel(QWidget):
-    show_clubs_list_signal = pyqtSignal() # Renamed for clarity and convention
+    show_clubs_list_signal = pyqtSignal()
     show_member_search_signal = pyqtSignal()
     show_ecp_requests_signal = pyqtSignal()
     show_notifications_signal = pyqtSignal()

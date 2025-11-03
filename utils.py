@@ -7,16 +7,16 @@ import qrcode
 import base64
 import xml.etree.ElementTree as ET
 from Crypto.Cipher import AES
-from cryptography.hazmat.primitives import padding # Pridaný import
+from cryptography.hazmat.primitives import padding # Added import
 from cryptography.hazmat.primitives.ciphers import algorithms
 from PyQt5.QtGui import QPixmap, QImage, QIcon, QPainter
 from PyQt5.QtCore import Qt, QTimer
 from google.cloud import storage
 from datetime import date
-from babel import Locale, UnknownLocaleError # Import pre Babel
-from babel.core import localedata # Zmenený import
+from babel import Locale, UnknownLocaleError # Import for Babel
+from babel.core import localedata # Changed import
 from config import secret_manager
-from PyQt5.QtWidgets import QMainWindow, QApplication # Pridané pre type hinting, prístup k status_bar a QApplication
+from PyQt5.QtWidgets import QMainWindow, QApplication # Added for type hinting, access to status_bar and QApplication
 
 if TYPE_CHECKING:
     from model import Member, Club
@@ -38,12 +38,12 @@ def load_all_configs():
         _app_config_cache.read(CONFIG_FILE_PATH, encoding='utf-8')
     else:
         _app_config_cache['DEFAULT'] = {
-            'preferred_country': 'SK', # Ukladáme kód krajiny
+            'preferred_country': 'SK', # We store the country code
             'preferred_language': 'en_US',
             'membership_currency': 'EUR',
             'membership_fee_normal': '20.00',
             'membership_fee_discounted': '10.00',
-            'membership_valid_until_month': '12', # December
+            'membership_valid_until_month': '12',
             'membership_valid_until_day': '31',   # 31st
             'membership_renewal_window_days': '90', # 90 days before expiry
             'iban': '' # Default empty IBAN
@@ -62,7 +62,6 @@ def load_all_configs():
     else:
         print(f"WARNING: '{SUPPORTED_LOCALES_FILE_PATH}' not found. Creating with default values.")
         _supported_locales_cache['Locales'] = {
-            'sk_SK': 'Slovenčina (Slovensko)',
             'en_US': 'English (United States)'
         }
         try:
@@ -84,13 +83,13 @@ def load_logo():
         print("Error loading logo:", e)
         return None
 
-def delete_photo_from_bucket(photo_hash: str): # Renamed parameter
-    # Nastavenie premennej prostredia pre autentifikáciu
+def delete_photo_from_bucket(photo_hash: str):
+    # Set environment variable for authentication
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_manager.get_secret("credentials_json")
 
     client = storage.Client(project=secret_manager.get_secret("project_id"))
     bucket = client.bucket(secret_manager.get_secret("bucket_name"))
-    # Fotografia je uložená s príponou .png
+    # The photo is saved with a .png extension
     blob = bucket.blob(f"{photo_hash}.png")
     try:
         blob.delete()
@@ -98,15 +97,15 @@ def delete_photo_from_bucket(photo_hash: str): # Renamed parameter
     except Exception as e:
         print("Chyba pri mazaní fotografie z bucketu:", e)
 
-def upload_photo_to_bucket(photo_hash: str, image_data): # Renamed parameter
+def upload_photo_to_bucket(photo_hash: str, image_data):
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_manager.get_secret("credentials_json")
 
-    # Vytvorenie klienta a získanie bucketu
+    # Create a client and get the bucket
     client = storage.Client()
     bucket = client.bucket(secret_manager.get_secret("bucket_name"))
 
     destination_blob_name = f"{photo_hash}.png"
-    # Vytvorenie objektu blob a upload súboru
+    # Create a blob object and upload the file
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_string(bytes(image_data), content_type="image/png")
 
@@ -125,7 +124,7 @@ def load_image_from_url(url, max_size=(225, 330)):
         pixmap = QPixmap()
         if not pixmap.loadFromData(data):
             raise Exception("Nepodarilo sa načítať pixmapu z dát.")
-        # Škálovanie obrázka na maximálnu veľkosť s udržaním pomeru strán
+        # Scale the image to the maximum size while maintaining the aspect ratio
         pixmap = pixmap.scaled(max_size[0], max_size[1], Qt.KeepAspectRatio, Qt.SmoothTransformation)
         return pixmap
     except requests.exceptions.RequestException as e:
@@ -137,10 +136,10 @@ def decrypt_date(encrypted_hex):
 
 def _encrypt_data(data: str) -> str:
     try:
-        # Použijeme prvých 16 bajtov kľúča pre AES; kľúč musí byť rovnaký ako v DB
+        # Use the first 16 bytes of the key for AES; the key must be the same as in the DB
         key_bytes = secret_manager.get_secret("crypt_key").encode('utf-8')[:16]
         cipher = AES.new(key_bytes, AES.MODE_CBC)
-        iv = cipher.iv  # Použijeme vygenerovaný IV
+        iv = cipher.iv  # Use the generated IV
 
         padder = padding.PKCS7(algorithms.AES.block_size).padder()
         padded_data = padder.update(data.encode('utf-8')) + padder.finalize()
@@ -165,26 +164,26 @@ def _decrypt_data(encrypted_hex: str) -> str:
         return None
 
     try:
-        # Previesť hex reťazec na bajty
+        # Convert hex string to bytes
         encrypted_bytes = binascii.unhexlify(encrypted_hex)
 
-        # Oddeliť IV (prvých 16 bajtov)
+        # Separate IV (first 16 bytes)
         iv = encrypted_bytes[:16]
         ciphertext = encrypted_bytes[16:]
 
-        # Použijeme prvých 16 bajtov kľúča; kľúč musí byť rovnaký ako v DB
+        # Use the first 16 bytes of the key; the key must be the same as in the DB
         key_bytes = secret_manager.get_secret("crypt_key").encode('utf-8')[:16]
         cipher = AES.new(key_bytes, AES.MODE_CBC, iv=iv)
 
         decrypted_padded = cipher.decrypt(ciphertext)
 
-        # Odstránenie PKCS7 paddingu
+        # Remove PKCS7 padding
         unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
         unpadded_data = unpadder.update(decrypted_padded) + unpadder.finalize()
         return unpadded_data.decode('utf-8')
     except (binascii.Error, ValueError, Exception) as e:
         print(f"Decryption error for hex '{encrypted_hex}': {e}")
-        return None  # Vrátime None, ak sa nepodarí dekódovať
+        return None  # Return None if decoding fails
 
 def _encrypt_symmetric(plaintext: str) -> bytes:
     """Symmetrically encrypts a string using AES CBC and returns bytes (iv + ciphertext)."""
@@ -280,7 +279,7 @@ def generate_qr_code(data, logo_path):
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     
-    # Pridanie loga do stredu QR kódu
+    # Add logo to the center of the QR code
     if os.path.exists(logo_path):
         from PIL import Image
         logo = Image.open(logo_path)
@@ -349,10 +348,10 @@ def parse_camt053(xml_file):
     return {'statement_iban': statement_iban, 'transactions': transactions, 'error': None}
 
 ICON_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
-_ICON_CACHE = {} # Jednoduchá cache pre QPixmap objekty
+_ICON_CACHE = {} # Simple cache for QPixmap objects
 
 def _get_scaled_pixmap_from_cache(pix_file_name: str, target_size: int) -> QPixmap:
-    """Načíta alebo vráti oškálovaný QPixmap z cache."""
+    """Loads or returns a scaled QPixmap from the cache."""
     cache_key = (pix_file_name, target_size)
     if cache_key not in _ICON_CACHE:
         pixmap_path = os.path.join(ICON_FOLDER, pix_file_name)
@@ -360,25 +359,25 @@ def _get_scaled_pixmap_from_cache(pix_file_name: str, target_size: int) -> QPixm
         if not pix.isNull():
             _ICON_CACHE[cache_key] = pix.scaled(target_size, target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         else:
-            _ICON_CACHE[cache_key] = None # Alebo vrátiť transparentný placeholder, ak ikona neexistuje
+            _ICON_CACHE[cache_key] = None # Or return a transparent placeholder if the icon does not exist
     return _ICON_CACHE[cache_key]
 
-def get_icon(icon_name: str) -> QIcon: # Renamed parameter
+def get_icon(icon_name: str) -> QIcon:
     icon_path = os.path.join(ICON_FOLDER, icon_name)
     if os.path.exists(icon_path):
         return QIcon(icon_path)
 
-# Pre typové anotácie použijeme stringy (forward references), aby sme sa vyhli problémom s importom
-# počas behu programu, ak by `from __future__ import annotations` nebolo použité.
+# For type annotations, we will use strings (forward references) to avoid import problems
+# during program execution if `from __future__ import annotations` is not used.
 def get_state_pixmap(member: 'Member', club: 'Club') -> QPixmap:
-    IMAGE_SIZE = 20 # Renamed constant, Zväčšené pre lepšiu viditeľnosť, pôvodne 16 v main_window legende
+    IMAGE_SIZE = 20 # Renamed constant, Enlarged for better visibility, originally 16 in main_window legend
 
     image_files = []
 
 
     if member.primary_club_id != club.club_id:
         icon_filename = "caver_yellow.png"
-    else: # Je v primárnom klube alebo je to jeho primárny klub
+    else: # Is in the primary club or it is their primary club
         member_status = member.status # Assuming translated attribute
         if member_status == "active": # Value "aktivny" might also need translation if it's a controlled vocabulary
             icon_filename = "caver_green.png"
@@ -389,10 +388,10 @@ def get_state_pixmap(member: 'Member', club: 'Club') -> QPixmap:
     
     if club.president_id is not None \
         and member.member_id == club.president_id \
-        and member.primary_club_id == club.club_id: # Predseda svojho primárneho klubu, assuming translated attributes
+        and member.primary_club_id == club.club_id: # President of their primary club, assuming translated attributes
         icon_filename = "caver_gold.png"
     
-    if member.status == "zblocked": # Zablokovaný má prednosť, assuming translated attribute
+    if member.status == "zblocked": # Blocked has priority, assuming translated attribute
         icon_filename = "caver_baned.png"
 
     if member.status is None: # Assuming translated attribute
@@ -409,19 +408,19 @@ def get_state_pixmap(member: 'Member', club: 'Club') -> QPixmap:
         if member.ecp_hash: # Assuming translated attribute
             image_files.append("wallet-icon_72.png")
 
-    # Vytvorenie kompozitnej ikony
-    # Každá prídavná ikona bude mať plnú šírku IMAGE_SIZE
+    # Creating a composite icon
+    # Each additional icon will have the full width of IMAGE_SIZE
     total_width = len(image_files) * IMAGE_SIZE
     composite = QPixmap(total_width, IMAGE_SIZE)
-    composite.fill(Qt.transparent) # Priehľadné pozadie
+    composite.fill(Qt.transparent) # Transparent background
 
     painter = QPainter(composite)
 
-    # Vykreslíme prídavné ikony vedľa seba, za základnou ikonou
+    # We draw the additional icons next to each other, behind the base icon
     current_x = 0
     for pix_file in image_files:
         scaled_pix = _get_scaled_pixmap_from_cache(pix_file, IMAGE_SIZE)
-        if scaled_pix: # Ak je scaled_pix None (ikona sa nenašla/nenačítala), preskočíme kreslenie
+        if scaled_pix: # If scaled_pix is None (icon not found/loaded), we skip drawing
             painter.drawPixmap(current_x, 0, scaled_pix)
         current_x += IMAGE_SIZE
 
@@ -486,10 +485,10 @@ def get_table_header_stylesheet() -> str:
     """Returns the stylesheet for dark table headers."""
     return """
         QHeaderView::section {
-            background-color: #011F4B; /* Tmavosivé pozadie */
-            color: white;              /* Biely text */
-            padding: 1px;              /* Vnútorný okraj pre text */
-            border: 1px solid #B3CDE0; /* Jemný okraj okolo každej sekcie hlavičky */
+            background-color: #011F4B; /* Dark gray background */
+            color: white;              /* White text */
+            padding: 1px;              /* Inner margin for text */
+            border: 1px solid #B3CDE0; /* Subtle border around each header section */
         }
     """
 
@@ -505,8 +504,8 @@ def _get_main_window_instance() -> QMainWindow:
 
 def _set_status_message(message: str, background_color: str, text_color: str = "white", duration: int = 5000):
     """
-    Interná funkcia na zobrazenie správy v stavovom riadku s určenou farbou pozadia.
-    Automaticky nájde hlavné okno aplikácie.
+    Internal function to display a message in the status bar with a specified background color.
+    Automatically finds the main application window.
     """
     main_window_instance = _get_main_window_instance()
 
@@ -524,19 +523,19 @@ def _set_status_message(message: str, background_color: str, text_color: str = "
     QTimer.singleShot(duration, lambda: status_bar.setStyleSheet(original_stylesheet))
 
 def show_success_message(message: str, duration: int = 15000):
-    """Zobrazí úspešnú správu (zelené pozadie)."""
+    """Displays a success message (green background)."""
     _set_status_message(message, background_color="#4CAF50", text_color="white", duration=duration)
 
 def show_warning_message(message: str, duration: int = 15000):
-    """Zobrazí varovnú správu (oranžové pozadie)."""
+    """Displays a warning message (orange background)."""
     _set_status_message(message, background_color="#FF9800", text_color="black", duration=duration)
 
 def show_error_message(message: str, duration: int = 15000):
-    """Zobrazí chybovú správu (červené pozadie)."""
+    """Displays an error message (red background)."""
     _set_status_message(message, background_color="#F44336", text_color="white", duration=duration)
 
 def show_info_message(message: str, duration: int = 15000):
-    """Zobrazí informačnú správu (modré pozadie)."""
+    """Displays an informational message (blue background)."""
     _set_status_message(message, background_color="#2196F3", text_color="white", duration=duration)
 
 def get_preferred_country_code() -> str:
@@ -549,7 +548,7 @@ def get_preferred_language() -> str:
     if _app_config_cache is None:
         print("WARNING: App config not loaded. Call load_all_configs() at startup.")
         return 'sk_SK' # Fallback
-    return _app_config_cache.get('DEFAULT', 'preferred_language', fallback='sk_SK')
+    return _app_config_cache.get('DEFAULT', 'preferred_language', fallback='en_US')
 
 def get_world_countries(locale_identifier: str = None) -> list[tuple[str, str]]:
     """
@@ -561,19 +560,19 @@ def get_world_countries(locale_identifier: str = None) -> list[tuple[str, str]]:
 
     try:
         locale = Locale.parse(locale_identifier)
-        if locale is None or locale.territories is None: # Dodatočná kontrola
+        if locale is None or locale.territories is None: # Additional check
              print(f"Warning: Could not get territories for locale '{locale_identifier}'. Returning empty list.")
              return []
         
         countries = []
         for code, name in locale.territories.items():
-            # Zahrnieme len štandardné 2-písmenové kódy krajín
-            # a vynecháme kódy pre regióny, kontinenty atď. (napr. 'ZZ', 'EU', 'EZ', 'UN', 'QO')
-            # a tiež kódy, ktoré nemajú platný názov v danom locale (Babel môže vrátiť kód ako názov)
+            # We only include standard 2-letter country codes
+            # and omit codes for regions, continents, etc. (e.g., 'ZZ', 'EU', 'EZ', 'UN', 'QO')
+            # and also codes that do not have a valid name in the given locale (Babel might return the code as the name)
             if len(code) == 2 and code.isalpha() and code.upper() != name:
                 countries.append((name, code.upper()))
         
-        # Zoradenie podľa lokalizovaného názvu krajiny
+        # Sort by localized country name
         countries.sort(key=lambda x: x[0])
         return countries
     except UnknownLocaleError:
@@ -587,11 +586,11 @@ def save_app_settings(
     preferred_country_code: str,
     preferred_language: str,
     membership_currency: str,
-    membership_fee_normal: str, # Ukladáme ako string, konverzia pri použití
-    membership_fee_discounted: str, # Ukladáme ako string
-    membership_valid_until_month: str, # Ukladáme ako string
-    membership_valid_until_day: str, # Ukladáme ako string
-    membership_renewal_window_days: str, # Ukladáme ako string
+    membership_fee_normal: str, # Store as string, convert on use
+    membership_fee_discounted: str, # Store as string
+    membership_valid_until_month: str, # Store as string
+    membership_valid_until_day: str, # Store as string
+    membership_renewal_window_days: str, # Store as string
     iban: str
 ) -> bool:
     """Saves application settings to the config file."""
@@ -620,12 +619,11 @@ def save_app_settings(
 
 def get_supported_locales_display() -> dict:
     """Returns a dictionary of supported locales and their display names."""
-    if _supported_locales_cache is None or not _supported_locales_cache.has_section('Locales'):
-        print("WARNING: Supported locales config not loaded or 'Locales' section missing. Call load_all_configs() at startup or check file.")
-        # Fallback to a minimal default if file is missing or corrupt
-        return {'sk_SK': 'Slovenčina (Slovensko)', 'en_US': 'English (United States)'}
-    
-    return dict(_supported_locales_cache.items('Locales'))
+    if _supported_locales_cache is None:
+        load_all_configs() # Ensure config is loaded if it hasn't been already
+    if _supported_locales_cache and _supported_locales_cache.has_section('Locales'):
+        return dict(_supported_locales_cache.items('Locales'))
+    return {} # Return empty dict if loading fails or section is missing
 
 # Getters for new membership settings
 def get_membership_currency() -> str:

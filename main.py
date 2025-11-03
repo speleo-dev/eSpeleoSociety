@@ -1,13 +1,13 @@
 import sys
 import os
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QStackedWidget, QDialog, QStatusBar
-from PyQt5.QtGui import QIcon, QFont # Qt will be imported from QtCore
-from PyQt5.QtCore import QCoreApplication, Qt
-from config import secret_manager
+from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtCore import QCoreApplication, Qt, QTranslator, QLocale, QLibraryInfo
+from config import secret_manager, get_preferred_language
 from setup import run_setup, show_pin_dialog
 import db, model
 
-# Importujeme navigačný panel a obsahové view
+# Import navigation panel and content views
 from navigation_panel import NavigationPanel
 from views.clubs_list_view import ClubsListView
 from views.member_search_view import MemberSearchView
@@ -15,8 +15,8 @@ from views.ecp_requests_view import ECPRequestsView
 from views.members_list_view import MembersListView # Added import
 from views.notifications_view import NotificationsView
 from views.sepa_import_view import SepaImportView
-from views.settings_view import SettingsView # Import nového view
-from views.reporting_view import ReportingView # Import nového ReportingView
+from views.settings_view import SettingsView # Import new view
+from views.reporting_view import ReportingView # Import new ReportingView
 from dialogs.club_management_dialog import ClubManagementDialog
 from utils import load_logo, show_warning_message, load_all_configs
 
@@ -26,18 +26,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(QCoreApplication.translate("MainWindow", "eSpeleoSociety"))
         self.setGeometry(100, 100, 1200, 800)
 
-        # Pridanie stavového riadku
+        # Add status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.setStyleSheet("""
             QStatusBar {
-                border-top: 1px solid #B0B0B0; /* Horný rámik */
+                border-top: 1px solid #B0B0B0; /* Top border */
             }
             QStatusBar::item {
-                border: none; /* Odstráni prípadný rámik okolo jednotlivých položiek v statusbare */
+                border: none; /* Removes any border around individual items in the statusbar */
             }
         """)
-        
+
         # # Nastavenie ikonky okna
         # icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")
         # if os.path.exists(icon_path):
@@ -63,16 +63,16 @@ class MainWindow(QMainWindow):
         self.content_panel = QStackedWidget()
         main_layout.addWidget(self.content_panel)
         
-        # Vytvorenie inštancií jednotlivých view
-        self.clubs_list_view = ClubsListView(parent=self)            # Zoznam klubov
-        self.members_list_view = MembersListView(parent_window=self, parent=self)        # Zoznam členov pre konkrétny klub
-        self.member_search_view = MemberSearchView()          # Vyhľadávanie člena
+        # Creating instances of individual views
+        self.clubs_list_view = ClubsListView(parent=self)            # List of clubs
+        self.members_list_view = MembersListView(parent_window=self, parent=self)        # List of members for a specific club
+        self.member_search_view = MemberSearchView()          # Member search
         self.ecp_requests_view = ECPRequestsView()            # eCP requests
         self.notifications_view = NotificationsView()         # SSS messages
         self.sepa_import_view = SepaImportView()              # Import SEPA statement
-        self.settings_view = SettingsView()                   # Nastavenia aplikácie
+        self.settings_view = SettingsView()                   # Application settings
         self.reporting_view = ReportingView()                 # Reporting view
-        
+
         # Adding views to the content panel
         self.content_panel.addWidget(self.clubs_list_view)       
         self.content_panel.addWidget(self.members_list_view)
@@ -80,17 +80,17 @@ class MainWindow(QMainWindow):
         self.content_panel.addWidget(self.ecp_requests_view)       
         self.content_panel.addWidget(self.notifications_view)      
         self.content_panel.addWidget(self.sepa_import_view)
-        self.content_panel.addWidget(self.settings_view) # Pridanie SettingsView
-        self.content_panel.addWidget(self.reporting_view) # Pridanie ReportingView
-        
+        self.content_panel.addWidget(self.settings_view) # Adding SettingsView
+        self.content_panel.addWidget(self.reporting_view) # Adding ReportingView
+
         # Connecting signals from the navigation panel with content switching
         self.nav_panel.show_clubs_list_signal.connect(lambda: self.content_panel.setCurrentWidget(self.clubs_list_view))
         self.nav_panel.show_member_search_signal.connect(lambda: self.content_panel.setCurrentWidget(self.member_search_view))
         self.nav_panel.show_ecp_requests_signal.connect(lambda: self.content_panel.setCurrentWidget(self.ecp_requests_view))
         self.nav_panel.show_notifications_signal.connect(lambda: self.content_panel.setCurrentWidget(self.notifications_view))
         self.nav_panel.show_sepa_import_signal.connect(lambda: self.content_panel.setCurrentWidget(self.sepa_import_view))
-        self.nav_panel.show_settings_signal.connect(lambda: self.content_panel.setCurrentWidget(self.settings_view)) # Prepojenie signálu
-        self.nav_panel.show_reporting_signal.connect(lambda: self.content_panel.setCurrentWidget(self.reporting_view)) # Prepojenie signálu pre Reporting
+        self.nav_panel.show_settings_signal.connect(lambda: self.content_panel.setCurrentWidget(self.settings_view)) # Connecting the signal
+        self.nav_panel.show_reporting_signal.connect(lambda: self.content_panel.setCurrentWidget(self.reporting_view)) # Connecting the signal for Reporting
 
         # Connecting the signal from ClubsListView to display members
         self.clubs_list_view.navigateToMembers.connect(self.display_members_for_club)
@@ -116,13 +116,13 @@ class MainWindow(QMainWindow):
                 else:
                     # If the club was not found after editing (e.g., it was deleted by another process in the meantime)
                     show_warning_message(QCoreApplication.translate("MainWindow", f"Club with ID {club.club_id} could not be loaded after editing."))
-                   # Return to the list of clubs
+                    # Return to the list of clubs
                     self.content_panel.setCurrentWidget(self.clubs_list_view)
 
     def display_members_for_club(self, club_id: int):
         club = db.db_manager.fetch_club_by_id(club_id)
         if club:
-            self.current_club = club # Nastavíme aktuálny klub v MainWindow
+            self.current_club = club # Set the current club in MainWindow
             self.members_list_view.load_data_for_club(club)
             self.content_panel.setCurrentWidget(self.members_list_view)
         else:
@@ -130,21 +130,39 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     # Aktivácia podpory pre High DPI scaling
-    # Toto musí byť zavolané pred vytvorením QApplication
+    # This must be called before creating the QApplication
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
 
     app = QApplication(sys.argv)
+
+    # translations
+    pref_language = get_preferred_language() 
+
+    qt_translator = QTranslator()
+    qt_translation_path = QLibraryInfo.location(QLibraryInfo.TranslationsPath)
+    if qt_translator.load(QLocale(pref_language), "qt", "_", qt_translation_path):
+        app.installTranslator(qt_translator)
+    else:
+        print(f"Warning: Could not load Qt base translations for locale '{pref_language}' from '{qt_translation_path}'.")
+
+    app_translator = QTranslator()
+    translation_file = os.path.join("translate", f"{pref_language}.qm")
+    if os.path.exists(translation_file):
+        if app_translator.load(translation_file):
+            app.installTranslator(app_translator)
+        else:
+            print(f"Error: Failed to load application translation file: {translation_file}")
     
-    # Nastavenie globálneho štýlu pre QPushButton
+    # Setting the global style for QPushButton
     app.setStyleSheet("""
         QPushButton {
             border: 1px solid #8f8f91;
-            border-radius: 6px; /* Toto nastaví zaoblené rohy */
+            border-radius: 6px; /* This sets rounded corners */
             background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
                                               stop: 0 #f6f7fa, stop: 1 #dadbde);
-            min-width: 50px; /* Zmenšená minimálna šírka tlačidla */
-            padding: 5px; /* Vnútorný okraj pre text */
+            min-width: 50px; /* Reduced minimum button width */
+            padding: 5px; /* Inner margin for text */
         }
         QPushButton:hover {
             background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
@@ -186,7 +204,7 @@ if __name__ == "__main__":
             print(error_message)
             sys.exit()
     
-    # Načítanie aplikačných a knižničných konfigurácií
+    # Loading application and library configurations
     load_all_configs()
 
     # DB Init

@@ -4,8 +4,8 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDate
                              QPushButton, QHBoxLayout, QMessageBox, QLabel, QFileDialog, QSizePolicy)
 from PyQt5.QtCore import Qt, QDate, QBuffer, QIODevice
 from PyQt5.QtGui import QIcon, QPixmap
-import db, utils # Added import for db and utils
-from utils import show_success_message, show_warning_message, show_error_message, show_info_message # Pridané importy
+import db, utils
+from utils import show_success_message, show_warning_message, show_error_message, show_info_message # Added imports
 from model import Club, Membership, Member
 from utils import get_icon, load_image_from_url, upload_to_bucket, delete_object_from_bucket_by_url
 from config import secret_manager
@@ -44,7 +44,7 @@ class ClubManagementDialog(QDialog):
         self.le_zip_code = QLineEdit(self.club.zip_code)
         
         self.cb_country = QComboBox()
-        countries_data = utils.get_world_countries() # Načíta krajiny podľa preferovaného jazyka
+        countries_data = utils.get_world_countries() # Loads countries according to the preferred language
         for country_name, country_code in countries_data:
             self.cb_country.addItem(country_name, country_code)
         
@@ -254,7 +254,7 @@ class ClubManagementDialog(QDialog):
         if not self.le_zip_code.text().strip():
             show_warning_message(self.tr("Please fill in the ZIP code."))
             return
-        if not self.cb_country.currentData(): # Kontrola, či je vybraná platná krajina (kód)
+        if not self.cb_country.currentData(): # Check if a valid country (code) is selected
             show_warning_message(self.tr("Please select a country."))
             return
         if not self.le_email.text().strip():
@@ -298,8 +298,8 @@ class ClubManagementDialog(QDialog):
                 if pixmap_to_upload.isNull():
                     show_warning_message(self.tr("Could not load the selected logo image."))
                     self.selected_logo_path = None # Reset
-                    # Ak by sme chceli vrátiť pôvodné logo, tu by bola logika
-                    # self.club.logo_url = self.original_club_data.logo_url 
+                    # If we wanted to return the original logo, the logic would be here
+                    # self.club.logo_url = self.original_club_data.logo_url
                     return # Ukončíme, ak sa logo nenačítalo
 
                 MAX_UPLOAD_WIDTH = 500
@@ -329,7 +329,7 @@ class ClubManagementDialog(QDialog):
                     buffer.close()
                     return
                 
-                logo_data = buffer.data().data() # Získanie bajtov z QBuffer
+                logo_data = buffer.data().data() # Get bytes from QBuffer
                 buffer.close()
 
                 old_logo_url_to_delete = None
@@ -381,7 +381,7 @@ class ClubManagementDialog(QDialog):
         self.le_street.setText(self.original_club_data.street)
         self.le_city.setText(self.original_club_data.city)
         self.le_zip_code.setText(self.original_club_data.zip_code)
-        # Nastavenie ComboBoxu pre krajinu
+        # Setting the ComboBox for the country
         idx = self.cb_country.findData(self.original_club_data.country)
         self.cb_country.setCurrentIndex(idx if idx >=0 else 0)
         date_val = self.original_club_data.foundation_date

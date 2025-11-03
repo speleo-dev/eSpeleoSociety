@@ -108,5 +108,14 @@ class SecretManager:
     def get_logo_url(self): # Name is already English
         return f"https://storage.googleapis.com/{self.secrets.get('bucket_name')}/{self.secrets.get('logo_pic')}"
 
-# Vytvoríme inštanciu SecretManager globálne
+# Function to quickly get the language without initializing the entire application
+def get_preferred_language():
+    """Reads preferred language directly from config file for early app setup."""
+    config = configparser.ConfigParser()
+    if os.path.exists('config.properties'):
+        config.read('config.properties', encoding='utf-8')
+        return config.get('DEFAULT', 'preferred_language', fallback='en_US')
+    return 'en_US' # Fallback if the file does not exist
+
+# Create a global instance of SecretManager
 secret_manager = SecretManager()
