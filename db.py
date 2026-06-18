@@ -1,9 +1,56 @@
 import psycopg2
 import psycopg2.extras
+import re
 from config import secret_manager
 from typing import List
 from model import Club, Membership, Ecp, EcpRequest, Member # EcpRequest model might need photo_hash
 import datetime # Added import
+
+SENSITIVE_LOG_KEYS = (
+    "birth_date",
+    "birth_date_encrypted",
+    "check_hash",
+    "city",
+    "credentials_json",
+    "crypt_key",
+    "db_password",
+    "ecp_hash",
+    "email",
+    "phone",
+    "photo_hash",
+    "street",
+    "zip_code",
+)
+
+
+def sanitize_log_details(details: str) -> str:
+    """Redact personal data and credential-like values before DB audit logging."""
+    if details is None:
+        return ""
+
+    sanitized = str(details)
+    for key in SENSITIVE_LOG_KEYS:
+        quoted_pattern = re.compile(
+            rf"(['\"]?{re.escape(key)}['\"]?\s*[:=]\s*)(['\"])(.*?)(\2)",
+            re.IGNORECASE,
+        )
+        sanitized = quoted_pattern.sub(r"\1\2[REDACTED]\4", sanitized)
+
+        unquoted_pattern = re.compile(
+            rf"(['\"]?{re.escape(key)}['\"]?\s*[:=]\s*)([^,}}\]\n]+)",
+            re.IGNORECASE,
+        )
+        sanitized = unquoted_pattern.sub(r"\1[REDACTED]", sanitized)
+
+        prose_pattern = re.compile(
+            rf"({re.escape(key)}\s+)([^\s,;]+)",
+            re.IGNORECASE,
+        )
+        sanitized = prose_pattern.sub(r"\1[REDACTED]", sanitized)
+
+    return sanitized
+
+
 class DatabaseManager:
     def __init__(self):
         self.connection_params = {
@@ -39,6 +86,7 @@ class DatabaseManager:
     def _log_action(self, action: str, table_name: str, details: str, user: str = None):
         if user is None:
             user = self.connection_params.get("user", "unknown")
+        details = sanitize_log_details(details)
         query = """
         INSERT INTO db_logs (action, table_name, user_name, details)
         VALUES (%s, %s, %s, %s);
@@ -357,7 +405,7 @@ class DatabaseManager:
 
     def fetch_ecp_record_by_photo_hash(self, photo_hash: str) -> Ecp: # New method
         query = """
-        SELECT er.ecp_hash, er.gdpr_consent, er.notifications_enabled, er.photo_hash, er.ecp_active, m.member_id
+        SELECT er.ecp_hash, er.gdpr_consent, er.notifications_enabled, er.photo_hash, er.ecp_active, er.check_hash, m.member_id
         FROM ecp_records er 
         LEFT JOIN members m ON er.member_id = m.member_id  -- Assuming ecp_records.member_id exists
         WHERE er.photo_hash = %s;
@@ -373,7 +421,7 @@ class DatabaseManager:
                 notifications_enabled=row['notifications_enabled'],
                 photo_hash=row['photo_hash'],
                 is_ecp_active=row['ecp_active'], 
-                check_hash=row.get('check_hash'), 
+                check_hash=row['check_hash'], 
                 member_id=row['member_id'] 
             )
         return None
@@ -382,7 +430,7 @@ class DatabaseManager:
         query = """
         SELECT r.request_id, r.member_id, r.status, r.request_date, er.photo_hash
         FROM ecp_requests r
-        JOIN ecp_records er ON r.ecp_record_id = er.ecp_record_id
+        JOIN ecp_records er ON r.photo_hash = er.photo_hash
         WHERE r.status = 'pending'
         ORDER BY r.request_date DESC;
         """
@@ -440,7 +488,7 @@ class DatabaseManager:
             club.club_id
         )
         self._execute(query, params)
-        self._log_action("UPDATE", "clubs", f"Updated club ID {club.club_id} with data: {club.__dict__}")
+        self._log_action("UPDATE", "clubs", f"Updated club ID {club.club_id}")
 
     def insert_club(self, club: Club):
         query = """
@@ -463,7 +511,7 @@ class DatabaseManager:
         new_id_row = self._fetch_one(query, params)
         if new_id_row:
             new_id = new_id_row[0]
-            self._log_action("INSERT", "clubs", f"Inserted club with data: {club.__dict__}")
+            self._log_action("INSERT", "clubs", f"Inserted club ID {new_id}")
             return new_id
         return None
 
@@ -500,7 +548,7 @@ class DatabaseManager:
             member.member_id
         )
         self._execute(query, params)
-        self._log_action("UPDATE", "members", f"Updated member ID {member.member_id} with data: {member.__dict__}")
+        self._log_action("UPDATE", "members", f"Updated member ID {member.member_id}")
 
     def insert_member(self, member: Member):
         query = """
@@ -539,7 +587,7 @@ class DatabaseManager:
         row = self._fetch_one(query, params)
         if row:
             new_id = row[0]
-            self._log_action("INSERT", "members", f"Inserted member with data: {member.__dict__}")
+            self._log_action("INSERT", "members", f"Inserted member ID {new_id}")
             return new_id
         return None
 
@@ -590,13 +638,13 @@ class DatabaseManager:
             # ecp.member_id -- Removed as per requirement
         )
         self._execute(query, params)
-        self._log_action("INSERT", "ecp_records", f"Inserted eCP record: {ecp.__dict__}")
+        self._log_action("INSERT", "ecp_records", f"Inserted eCP record for member ID {ecp.member_id}")
 
     def update_ecp_active(self, current_ecp_hash: str, active: bool): # current_ecp_hash is the one to find the record
         query = "UPDATE ecp_records SET ecp_active = %s WHERE ecp_hash = %s;" 
         params = (active, current_ecp_hash)
         self._execute(query, params)
-        self._log_action("UPDATE", "ecp_records", f"Updated eCP active status for hash {current_ecp_hash} to {active}")
+        self._log_action("UPDATE", "ecp_records", f"Updated eCP active status to {active}")
 
     def update_ecp_record_on_approval(self, photo_hash: str, new_generated_ecp_hash: str):
         query = """
@@ -606,7 +654,7 @@ class DatabaseManager:
         """
         params = (new_generated_ecp_hash, photo_hash)
         self._execute(query, params)
-        self._log_action("UPDATE", "ecp_records", f"Approved eCP record for photo_hash {photo_hash}, new ecp_hash: {new_generated_ecp_hash}")
+        self._log_action("UPDATE", "ecp_records", "Approved eCP record")
 
     def update_member_ecp_hash(self, member_id: int, new_generated_ecp_hash: str):
         query = """
@@ -615,12 +663,12 @@ class DatabaseManager:
         WHERE member_id = %s;
         """
         self._execute(query, (new_generated_ecp_hash, member_id))
-        self._log_action("UPDATE", "members", f"Set ecp_hash for member_id {member_id} to {new_generated_ecp_hash}")
+        self._log_action("UPDATE", "members", f"Set eCP hash for member ID {member_id}")
     
     def delete_ecp_record(self, ecp_hash: str):
         query = "DELETE FROM ecp_records WHERE ecp_hash = %s;"
         self._execute(query, (ecp_hash,))
-        self._log_action("DELETE", "ecp_records", f"Deleted eCP record with hash {ecp_hash}")
+        self._log_action("DELETE", "ecp_records", "Deleted eCP record")
 
     def insert_ecp_request(self, member_id: int, photo_hash: str):
         query = """
@@ -628,7 +676,7 @@ class DatabaseManager:
         VALUES (%s, %s, 'pending', CURRENT_DATE);
         """
         self._execute(query, (member_id, photo_hash))
-        self._log_action("INSERT", "ecp_requests", f"Inserted eCP request for member ID {member_id} with photo_hash {photo_hash}")
+        self._log_action("INSERT", "ecp_requests", f"Inserted eCP request for member ID {member_id}")
 
     def update_ecp_request_status(self, request_id: int, new_status: str):
         query = "UPDATE ecp_requests SET status = %s WHERE request_id = %s;"
@@ -649,7 +697,7 @@ class DatabaseManager:
     def delete_ecp_record_by_photo_hash(self, photo_hash: str):
         query = "DELETE FROM ecp_records WHERE photo_hash = %s;"
         self._execute(query, (photo_hash,))
-        self._log_action("DELETE", "ecp_records", f"Deleted eCP record with photo_hash {photo_hash}")
+        self._log_action("DELETE", "ecp_records", "Deleted eCP record by photo reference")
 
 # Global instance, if needed
 db_manager: DatabaseManager = None

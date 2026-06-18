@@ -6,12 +6,10 @@ import requests, os, binascii
 import qrcode
 import base64
 import xml.etree.ElementTree as ET
-from Crypto.Cipher import AES
 from cryptography.hazmat.primitives import padding # Added import
 from cryptography.hazmat.primitives.ciphers import algorithms
 from PyQt5.QtGui import QPixmap, QImage, QIcon, QPainter
 from PyQt5.QtCore import Qt, QTimer
-from google.cloud import storage
 from datetime import date
 from babel import Locale, UnknownLocaleError # Import for Babel
 from babel.core import localedata # Changed import
@@ -27,6 +25,20 @@ SUPPORTED_LOCALES_FILE_PATH = os.path.join('translate', 'supported_locales.ini')
 
 _app_config_cache = None
 _supported_locales_cache = None
+
+def _get_aes_module():
+    try:
+        from Crypto.Cipher import AES
+        return AES
+    except ImportError as exc:
+        raise RuntimeError("Missing dependency 'pycryptodome' for AES operations.") from exc
+
+def _get_storage_module():
+    try:
+        from google.cloud import storage
+        return storage
+    except ImportError as exc:
+        raise RuntimeError("Missing dependency 'google-cloud-storage' for GCS operations.") from exc
 
 def load_all_configs():
     """Loads both application and library configurations."""
@@ -87,6 +99,7 @@ def delete_photo_from_bucket(photo_hash: str):
     # Set environment variable for authentication
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_manager.get_secret("credentials_json")
 
+    storage = _get_storage_module()
     client = storage.Client(project=secret_manager.get_secret("project_id"))
     bucket = client.bucket(secret_manager.get_secret("bucket_name"))
     # The photo is saved with a .png extension
@@ -101,6 +114,7 @@ def upload_photo_to_bucket(photo_hash: str, image_data):
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_manager.get_secret("credentials_json")
 
     # Create a client and get the bucket
+    storage = _get_storage_module()
     client = storage.Client()
     bucket = client.bucket(secret_manager.get_secret("bucket_name"))
 
@@ -112,9 +126,14 @@ def upload_photo_to_bucket(photo_hash: str, image_data):
 def send_to_google_wallet(req_details):
     # Simulácia odoslania nového objektu preukazu do Google Wallet API.
     # Implementujte reálne volanie API podľa dokumentácie Google Wallet.
-    print("Odosielam nový objekt preukazu do Google Wallet API pre žiadosť", req_details.get("photo_hash", "")) # Assuming translated key
+    print("Odosielam nový objekt preukazu do Google Wallet API pre žiadosť", get_request_field(req_details, "photo_hash", "")) # Assuming translated key
     # Simulovaný výsledok:
     return True
+
+def get_request_field(req_details, field_name, default=None):
+    if isinstance(req_details, dict):
+        return req_details.get(field_name, default)
+    return getattr(req_details, field_name, default)
 
 def load_image_from_url(url, max_size=(225, 330)):
     try:
@@ -137,6 +156,7 @@ def decrypt_date(encrypted_hex):
 def _encrypt_data(data: str) -> str:
     try:
         # Use the first 16 bytes of the key for AES; the key must be the same as in the DB
+        AES = _get_aes_module()
         key_bytes = secret_manager.get_secret("crypt_key").encode('utf-8')[:16]
         cipher = AES.new(key_bytes, AES.MODE_CBC)
         iv = cipher.iv  # Use the generated IV
@@ -165,6 +185,7 @@ def _decrypt_data(encrypted_hex: str) -> str:
 
     try:
         # Convert hex string to bytes
+        AES = _get_aes_module()
         encrypted_bytes = binascii.unhexlify(encrypted_hex)
 
         # Separate IV (first 16 bytes)
@@ -188,6 +209,7 @@ def _decrypt_data(encrypted_hex: str) -> str:
 def _encrypt_symmetric(plaintext: str) -> bytes:
     """Symmetrically encrypts a string using AES CBC and returns bytes (iv + ciphertext)."""
     try:
+        AES = _get_aes_module()
         key_bytes = secret_manager.get_secret("crypt_key").encode('utf-8')[:16]
         cipher = AES.new(key_bytes, AES.MODE_CBC)
         iv = cipher.iv
@@ -204,6 +226,7 @@ def _encrypt_symmetric(plaintext: str) -> bytes:
 def _decrypt_symmetric(encrypted_data: bytes) -> str:
     """Symmetrically decrypts bytes (iv + ciphertext) using AES CBC."""
     try:
+        AES = _get_aes_module()
         key_bytes = secret_manager.get_secret("crypt_key").encode('utf-8')[:16]
         iv = encrypted_data[:16]
         ciphertext = encrypted_data[16:]
@@ -437,6 +460,7 @@ def upload_to_bucket(blob_name: str, data: bytes, content_type: str) -> str:
         print("GCS config missing (project_id, bucket_name, or credentials_json). Cannot upload.")
         return None
 
+    storage = _get_storage_module()
     client = storage.Client(project=project_id)
     bucket = client.bucket(bucket_name)
     
@@ -469,6 +493,7 @@ def delete_object_from_bucket_by_url(gcs_url: str):
 
         # Re-use upload_to_bucket's setup for client, or make a common GCS client getter
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_manager.get_secret("credentials_json")
+        storage = _get_storage_module()
         client = storage.Client(project=secret_manager.get_secret("project_id"))
         bucket = client.bucket(bucket_name_from_url)
         blob = bucket.blob(blob_name)
