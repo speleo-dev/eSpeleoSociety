@@ -34,22 +34,22 @@ The schema has these main areas:
 - A member's currently active eCP is linked indirectly through `members.ecp_hash -> ecp_records.ecp_hash`.
 - A fee can reference both the member and the eCP hash that was current for that fee.
 
-## Current Code Conflicts
+## Code Conflicts Found And Fixed
 
-The author schema changes the next fix priority because it disproves two assumptions currently present in the desktop client:
+The author schema changed the next fix priority because it disproved two assumptions that were present in the desktop client:
 
-- `ecp_requests` does not have a `photo_hash` column. Current code inserts and joins eCP requests by `photo_hash`, so it will fail against this schema.
-- `ecp_records` does not have a `member_id` column. Current code tries to join `ecp_records` to `members` with `er.member_id`, so that lookup will fail against this schema.
+- `ecp_requests` does not have a `photo_hash` column. The previous code inserted and joined eCP requests by `photo_hash`, which would fail against this schema.
+- `ecp_records` does not have a `member_id` column. The previous code tried to join `ecp_records` to `members` with `er.member_id`, which would fail against this schema.
 
-The correct request path should use `ecp_requests.ecp_record_id`. The GUI can still expose `photo_hash`, but it should fetch that value by joining `ecp_requests.ecp_record_id` to `ecp_records.ecp_record_id`.
+The request path now uses `ecp_requests.ecp_record_id`. The GUI can still expose `photo_hash`, but it fetches that value by joining `ecp_requests.ecp_record_id` to `ecp_records.ecp_record_id`.
 
-Recommended immediate alignment:
+Alignment completed in the desktop client:
 
-1. eCP issue/request creation creates or reuses an `ecp_records` row first.
+1. eCP record creation returns `ecp_record_id`.
 2. eCP request creation inserts `member_id`, `ecp_record_id`, `status`, and `request_date`.
 3. Pending request fetch joins `ecp_requests.ecp_record_id = ecp_records.ecp_record_id`.
-4. Photo lookup fetches `ecp_records` by `photo_hash` without joining on nonexistent `ecp_records.member_id`; if member context is needed, join through `ecp_requests` or `members.ecp_hash`.
-5. Tests that currently assert `photo_hash` on `ecp_requests` must be updated to the author schema.
+4. Photo lookup fetches `ecp_records` by `photo_hash` without joining on nonexistent `ecp_records.member_id`.
+5. DB contract tests now assert the author schema relationship.
 
 ## Security Observations
 
@@ -109,12 +109,12 @@ That DTO hides the current database join path and lets the schema evolve later w
 
 ## Next Recommended Fix
 
-The next code change should align eCP request handling with the author schema before wiring signed offline QR issuance:
+The next code change can continue from the now-aligned eCP request handling and wire signed offline QR issuance:
 
-- update `EcpRequest` to carry `ecp_record_id` plus derived `photo_hash`,
-- update request insert/fetch/update SQL to use `ecp_record_id`,
-- remove joins against nonexistent `ecp_records.member_id`,
-- update tests to lock the real schema contract,
-- then proceed with signed QR generation during eCP approval.
+- build the signed QR claim from member, club, paid-year, and validity data,
+- store the signed payload or its immutable metadata,
+- generate the QR image from the signed payload,
+- keep the private signing key out of the desktop client in the final backend design,
+- add integration tests once a disposable PostgreSQL database is available.
 
-This is now higher priority than adding more QR fields because the current request flow will not run against the provided database snapshot.
+The desktop client still uses direct DB access, so this should remain a transitional implementation until the API backend owns eCP issuance.

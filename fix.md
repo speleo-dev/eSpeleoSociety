@@ -50,6 +50,15 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 - Fixed pending eCP request lookup to use the same photo reference written by the request insert path.
 - Fixed eCP record loading by selecting the `check_hash` field it reads.
 
+### Author Schema Alignment
+
+- Stored and analyzed the PostgreSQL schema export sent by the author on 2026-06-20.
+- Realigned eCP request SQL with the author schema: `ecp_requests` now links to `ecp_records` through `ecp_record_id`.
+- Removed the invalid `ecp_records.member_id` join assumption from photo-based eCP record lookup.
+- Added eCP record lookup, approval update, and deletion paths based on `ecp_record_id`.
+- Changed `insert_ecp` to return the created `ecp_record_id` for request linking.
+- Updated DB contract tests so they protect the real schema instead of the previous temporary `photo_hash` request shape.
+
 ### Audit Logging
 
 - Added audit log sanitization before log messages are written.
@@ -68,18 +77,18 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 ## Not Yet Done
 
 - The signed eCP QR payload is not yet wired into the GUI issuance dialog.
-- Author-provided PostgreSQL schema from 2026-06-20 shows that eCP request handling must be realigned: `ecp_requests` uses `ecp_record_id`, not `photo_hash`, and `ecp_records` has no `member_id`.
 - Google Wallet integration is still a placeholder.
 - The desktop client still uses direct database access; the API/OAuth2 migration is documented but not implemented.
 - The database is not yet protected behind a backend-only network boundary.
 - The member portal and club president portal do not exist yet.
 - Real database integration tests require a configured PostgreSQL database and encrypted local secrets.
+- The schema still lacks portal identity mapping, role assignments, eCP validity fields, Wallet issuance state, and a payment import ledger.
 
 ## Author Database Schema Snapshot
 
 The author sent an Adminer PostgreSQL 14.13 schema export on 2026-06-20. It is stored as a reference SQL artifact and analyzed in the database documentation. The export confirms the current production-oriented tables for members, clubs, club affiliations, membership fees, eCP records, eCP requests, certificates, notifications, configuration, and DB logs.
 
-Important finding: the dump conflicts with the current temporary eCP request query contract. The next fix should update the code and tests to follow the real schema before continuing with signed QR issuance.
+Important finding: the dump conflicted with the previous temporary eCP request query contract. The code and tests now follow the real `ecp_record_id` relationship. The next eCP fix can continue with signed QR issuance.
 
 ## API/OAuth2 Direction
 
@@ -89,9 +98,14 @@ The API migration plan is captured in the documentation added during this work. 
 
 ## Verification Snapshot
 
-At the end of this work, the focused tests passed and project Python files parsed successfully:
+At the end of the first stabilization pass, the focused tests passed and project Python files parsed successfully:
 
 - Focused tests: 11 tests passed.
 - Parser check: 35 project Python files parsed successfully.
 - Dependency import check in the local virtual environment passed.
 - No Python bytecode cache files remained in the project worktree.
+
+After the author schema alignment fix:
+
+- Focused tests: 16 tests passed.
+- DB contract tests now cover `ecp_record_id` request joins, request inserts, eCP record lookup by ID, approval updates by ID, deletion by ID, and returning `ecp_record_id` from eCP record creation.

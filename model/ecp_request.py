@@ -5,19 +5,21 @@ class EcpRequest:
     def __init__(self,
                  request_id: int,
                  member_id: int,
-                 photo_hash: str, # Hash of the photo associated with this request (from ecp_records)
+                 photo_hash: Optional[str], # Derived photo reference from ecp_records
                  status: str,
                  request_date: date,
-                 approved_ecp_hash: Optional[str] = None): # Final eCP hash if this request is approved
+                 approved_ecp_hash: Optional[str] = None, # Final eCP hash if this request is approved
+                 ecp_record_id: Optional[int] = None):
         self.request_id = request_id
         self.member_id = member_id
+        self.ecp_record_id = ecp_record_id
         self.photo_hash = photo_hash
         self.status = status
         self.request_date = request_date
         self.approved_ecp_hash = approved_ecp_hash
 
     def __repr__(self):
-        return f"<EcpRequest id={self.request_id} status='{self.status}' photo_hash='{self.photo_hash}'>"
+        return f"<EcpRequest id={self.request_id} status='{self.status}' ecp_record_id='{self.ecp_record_id}'>"
 
     def accept(self):
         from db import db_manager # Moved import inside as it was in original context
@@ -33,8 +35,11 @@ class EcpRequest:
         from utils import delete_photo_from_bucket # Moved import inside
         db_manager.update_ecp_request_status(self.request_id, 'rejected') # No approved_ecp_hash here
         # When a request is declined, the associated photo and ecp_record are deleted.
-        if self.photo_hash:
+        if self.ecp_record_id:
+            db_manager.delete_ecp_record_by_id(self.ecp_record_id)
+        elif self.photo_hash:
             db_manager.delete_ecp_record_by_photo_hash(self.photo_hash) # Deletes from ecp_records
+        if self.photo_hash:
             delete_photo_from_bucket(self.photo_hash) # Deletes from GCS
         member = db_manager.fetch_member_by_id(self.member_id) # fetch_member_by_id expects id
         member.ecp_hash = None

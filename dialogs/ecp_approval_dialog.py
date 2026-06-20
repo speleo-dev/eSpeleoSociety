@@ -12,8 +12,11 @@ class ECPApprovalDialog(QDialog):
         super().__init__(parent)
         self.req_details = req_details
         self.member = db.db_manager.fetch_member_by_id(req_details.member_id)
-        # We load the ecp_record using the photo_hash from the request
-        self.ecp_record = db.db_manager.fetch_ecp_record_by_photo_hash(req_details.photo_hash) 
+        self.ecp_record = None
+        if getattr(req_details, "ecp_record_id", None) is not None:
+            self.ecp_record = db.db_manager.fetch_ecp_record_by_id(req_details.ecp_record_id)
+        if self.ecp_record is None and req_details.photo_hash:
+            self.ecp_record = db.db_manager.fetch_ecp_record_by_photo_hash(req_details.photo_hash)
 
         self.setWindowTitle(self.tr("eCP Request Approval"))
         self.setWindowIcon(get_icon("logo.ico"))
@@ -60,13 +63,13 @@ class ECPApprovalDialog(QDialog):
         self.layout.addLayout(buttons_layout)
 
     def approve(self):
-        if not self.ecp_record or not self.ecp_record.photo_hash:
+        if not self.ecp_record or not self.ecp_record.ecp_id or not self.ecp_record.photo_hash:
             show_error_message(self.tr("Cannot approve: eCP record or photo hash is missing."))
             return
 
         new_generated_ecp_hash = secrets.token_hex(32)
 
-        db.db_manager.update_ecp_record_on_approval(self.ecp_record.photo_hash, new_generated_ecp_hash)
+        db.db_manager.update_ecp_record_on_approval(self.ecp_record.ecp_id, new_generated_ecp_hash)
         db.db_manager.update_member_ecp_hash(self.member.member_id, new_generated_ecp_hash)
         db.db_manager.update_ecp_request_status(self.req_details.request_id, "approved")
         
@@ -84,7 +87,10 @@ class ECPApprovalDialog(QDialog):
             return
 
         db.db_manager.update_ecp_request_status(self.req_details.request_id, "rejected")
-        db.db_manager.delete_ecp_record_by_photo_hash(self.ecp_record.photo_hash)
+        if self.ecp_record.ecp_id:
+            db.db_manager.delete_ecp_record_by_id(self.ecp_record.ecp_id)
+        else:
+            db.db_manager.delete_ecp_record_by_photo_hash(self.ecp_record.photo_hash)
         delete_photo_from_bucket(self.ecp_record.photo_hash)
         
         # If the member previously had an ecp_hash that now becomes invalid by rejecting this request,

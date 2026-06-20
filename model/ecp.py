@@ -8,7 +8,7 @@ class Ecp:
                  notifications_enabled: bool,
                  photo_hash: str,
                  is_ecp_active: bool,
-                 member_id: int,
+                 member_id: Optional[int],
                  check_hash: Optional[str] = None,
                  ecp_id: Optional[int] = None):
         self.ecp_id = ecp_id
