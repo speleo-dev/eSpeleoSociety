@@ -59,6 +59,14 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 - Changed `insert_ecp` to return the created `ecp_record_id` for request linking.
 - Updated DB contract tests so they protect the real schema instead of the previous temporary `photo_hash` request shape.
 
+### Local PostgreSQL Schema Bootstrap
+
+- Added a clean development/test PostgreSQL bootstrap schema derived from the author Adminer export.
+- Replaced Adminer-exported pgcrypto C function stubs with `CREATE EXTENSION IF NOT EXISTS pgcrypto`.
+- Omitted Adminer database/session commands so the schema can be applied to an already-created disposable database.
+- Added static schema tests that verify the expected author tables and the `ecp_requests.ecp_record_id` foreign key.
+- Added an optional PostgreSQL integration test gated by `ESPELEO_TEST_DATABASE_URL`; it is skipped during normal unit test runs when no test database is configured.
+
 ### Audit Logging
 
 - Added audit log sanitization before log messages are written.
@@ -109,3 +117,8 @@ After the author schema alignment fix:
 
 - Focused tests: 16 tests passed.
 - DB contract tests now cover `ecp_record_id` request joins, request inserts, eCP record lookup by ID, approval updates by ID, deletion by ID, and returning `ecp_record_id` from eCP record creation.
+
+After the local PostgreSQL schema bootstrap:
+
+- Static schema tests pass and verify the schema is not a raw Adminer dump.
+- PostgreSQL apply test is available but skipped unless `ESPELEO_TEST_DATABASE_URL` points at a disposable database.

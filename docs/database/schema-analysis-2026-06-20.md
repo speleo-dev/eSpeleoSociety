@@ -10,6 +10,8 @@ The supplied SQL is an Adminer 5.4.2 export from PostgreSQL 14.13 for database `
 
 The export should be treated as a reference snapshot, not a ready migration. The many `CREATE FUNCTION ... LANGUAGE c AS ''` statements are Adminer representations of pgcrypto functions. A proper restore or migration should install pgcrypto with `CREATE EXTENSION IF NOT EXISTS pgcrypto;` instead of redefining those functions manually.
 
+The repository now includes a separate development/test bootstrap schema derived from this export. Use that bootstrap for disposable local databases and integration tests. Keep the Adminer export as a reference artifact only.
+
 ## Data Model Summary
 
 The schema has these main areas:
