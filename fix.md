@@ -68,11 +68,18 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 ## Not Yet Done
 
 - The signed eCP QR payload is not yet wired into the GUI issuance dialog.
+- Author-provided PostgreSQL schema from 2026-06-20 shows that eCP request handling must be realigned: `ecp_requests` uses `ecp_record_id`, not `photo_hash`, and `ecp_records` has no `member_id`.
 - Google Wallet integration is still a placeholder.
 - The desktop client still uses direct database access; the API/OAuth2 migration is documented but not implemented.
 - The database is not yet protected behind a backend-only network boundary.
 - The member portal and club president portal do not exist yet.
 - Real database integration tests require a configured PostgreSQL database and encrypted local secrets.
+
+## Author Database Schema Snapshot
+
+The author sent an Adminer PostgreSQL 14.13 schema export on 2026-06-20. It is stored as a reference SQL artifact and analyzed in the database documentation. The export confirms the current production-oriented tables for members, clubs, club affiliations, membership fees, eCP records, eCP requests, certificates, notifications, configuration, and DB logs.
+
+Important finding: the dump conflicts with the current temporary eCP request query contract. The next fix should update the code and tests to follow the real schema before continuing with signed QR issuance.
 
 ## API/OAuth2 Direction
 
