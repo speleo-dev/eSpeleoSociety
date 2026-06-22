@@ -82,10 +82,20 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 - Tampered and expired payloads are rejected.
 - Added tests for successful verification, tampering, and expiration.
 
+### Signed eCP QR Issuance Flow
+
+- Added an eCP issuance service that builds a signed offline-verifiable claim, serializes it into QR data, and renders a PNG QR image.
+- Added signing secret loading for `ecp_signing_key_id`, `ecp_signing_private_key_b64`, and manually supplied PEM keys.
+- Added one-year default eCP validity with leap-year handling.
+- Wired direct eCP issuance and eCP request approval to generate and upload the signed QR before activating the eCP.
+- Added signing fields to the secrets setup dialog.
+- Added documentation for signing key generation, required secrets, offline verification, and the transitional backend migration caveat.
+
 ## Not Yet Done
 
-- The signed eCP QR payload is not yet wired into the GUI issuance dialog.
 - Google Wallet integration is still a placeholder.
+- The database does not yet persist signed QR payload metadata, QR URL, key id, issue timestamp, or validity timestamp.
+- The eCP private signing key still lives in the desktop secrets file as a transitional step; final signing should move behind the API backend.
 - The desktop client still uses direct database access; the API/OAuth2 migration is documented but not implemented.
 - The database is not yet protected behind a backend-only network boundary.
 - The member portal and club president portal do not exist yet.
@@ -96,7 +106,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 
 The author sent an Adminer PostgreSQL 14.13 schema export on 2026-06-20. It is stored as a reference SQL artifact and analyzed in the database documentation. The export confirms the current production-oriented tables for members, clubs, club affiliations, membership fees, eCP records, eCP requests, certificates, notifications, configuration, and DB logs.
 
-Important finding: the dump conflicted with the previous temporary eCP request query contract. The code and tests now follow the real `ecp_record_id` relationship. The next eCP fix can continue with signed QR issuance.
+Important finding: the dump conflicted with the previous temporary eCP request query contract. The code and tests now follow the real `ecp_record_id` relationship, and signed QR issuance is now wired into direct issuance and approval. The next eCP fix should persist QR metadata and validity dates in the database.
 
 ## API/OAuth2 Direction
 
@@ -122,3 +132,8 @@ After the local PostgreSQL schema bootstrap:
 
 - Static schema tests pass and verify the schema is not a raw Adminer dump.
 - PostgreSQL apply test is available but skipped unless `ESPELEO_TEST_DATABASE_URL` points at a disposable database.
+
+After the signed eCP QR issuance wiring:
+
+- Focused tests: 26 tests passed, 1 PostgreSQL integration test skipped without `ESPELEO_TEST_DATABASE_URL`.
+- eCP QR tests cover payload signing, verification, tamper rejection, expiration, one-year validity calculation, secret loading, PNG QR generation, upload handoff, GUI wiring, and setup fields.

@@ -54,6 +54,8 @@ The QR payload must not be just a random hash. It should contain a signed, minim
 
 Use an asymmetric signature for offline verification so scanner apps can verify with a public key. Keep private signing keys only in the backend.
 
+The desktop client currently has a transitional signed-QR implementation so issued eCP cards can be verified offline before the backend exists. During the API migration, move the private signing key and QR generation behind the backend and remove private signing secrets from desktop installations.
+
 ## Migration Sequence
 
 1. Add API client abstraction to the PyQt app while keeping `DatabaseManager` for current behavior.
