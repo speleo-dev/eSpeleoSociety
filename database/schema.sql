@@ -128,6 +128,15 @@ CREATE TABLE IF NOT EXISTS public.ecp_records (
     photo_hash text NOT NULL,
     ecp_active boolean DEFAULT false NOT NULL,
     check_hash character varying(64) NOT NULL,
+    qr_url text,
+    qr_key_id character varying(100),
+    qr_payload jsonb,
+    qr_payload_hash character varying(64),
+    issued_at timestamp,
+    valid_until date,
+    wallet_status character varying(30) DEFAULT 'not_issued',
+    wallet_object_id text,
+    wallet_last_error text,
     CONSTRAINT ecp_records_pkey PRIMARY KEY (ecp_record_id)
 );
 
@@ -135,6 +144,12 @@ ALTER SEQUENCE public.ecp_records_ecp_record_id_seq OWNED BY public.ecp_records.
 
 CREATE UNIQUE INDEX ecp_records_ecp_hash_key
     ON public.ecp_records USING btree (ecp_hash);
+
+CREATE INDEX idx_ecp_records_valid_until
+    ON public.ecp_records USING btree (valid_until);
+
+CREATE INDEX idx_ecp_records_wallet_status
+    ON public.ecp_records USING btree (wallet_status);
 
 CREATE TABLE IF NOT EXISTS public.ecp_requests (
     request_id integer DEFAULT nextval('public.ecp_requests_request_id_seq'::regclass) NOT NULL,

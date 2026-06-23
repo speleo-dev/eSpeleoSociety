@@ -47,6 +47,10 @@ class EcpIssuanceTest(unittest.TestCase):
         self.assertTrue(verify_ecp_payload(issued.payload, public_key_pem, now=date(2026, 6, 22)))
         self.assertTrue(issued.qr_png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertEqual(issued.blob_name, "ecp_qr/abc123.png")
+        self.assertEqual(issued.key_id, "test-key")
+        self.assertEqual(issued.valid_until, date(2027, 6, 22))
+        self.assertEqual(issued.issued_at, datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc))
+        self.assertEqual(len(issued.payload_hash), 64)
 
     def test_load_ecp_signing_config_accepts_escaped_pem_from_secrets(self):
         private_key_pem, _ = generate_ecp_signing_key_pair()
@@ -103,6 +107,8 @@ class EcpIssuanceTest(unittest.TestCase):
         self.assertEqual(uploads[0][2], "image/png")
         self.assertTrue(uploads[0][1].startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertTrue(verify_ecp_payload(issued.payload, public_key_pem, now=date(2026, 6, 22)))
+        self.assertEqual(issued.key_id, "key-2026")
+        self.assertEqual(len(issued.payload_hash), 64)
 
 
 if __name__ == "__main__":

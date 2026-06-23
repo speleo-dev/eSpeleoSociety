@@ -68,9 +68,8 @@ The schema supports a basic desktop administration flow, but it is not yet enoug
 - No portal user identity mapping.
 - No role assignments for `admin`, `club_president`, and `member`.
 - No object-level authorization table for president-to-club scope beyond `clubs.president_id`.
-- No eCP validity dates in `ecp_records`.
-- No signed offline QR payload storage, key id, signature metadata, or QR version.
-- No Google Wallet state fields such as wallet object id, issuance status, last error, or issued timestamp.
+- eCP QR metadata fields were added after the author dump; existing databases need the QR metadata migration before signed issuance can run.
+- No complete Google Wallet integration exists yet; only status/object/error fields are present for future issuance tracking.
 - No payment import ledger fields such as amount, variable symbol/reference, transaction id, statement id, booked date, or source bank account.
 - No unique protection against duplicate fee rows for the same member/year/fee type.
 - No explicit eCP request status check constraint.
@@ -111,12 +110,10 @@ That DTO hides the current database join path and lets the schema evolve later w
 
 ## Next Recommended Fix
 
-The next code change can continue from the now-aligned eCP request handling and wire signed offline QR issuance:
+The next code change can continue from the now-aligned eCP request handling and persisted signed QR metadata:
 
-- build the signed QR claim from member, club, paid-year, and validity data,
-- store the signed payload or its immutable metadata,
-- generate the QR image from the signed payload,
-- keep the private signing key out of the desktop client in the final backend design,
+- implement real Google Wallet object issuance and update Wallet status fields transactionally,
+- move the private signing key and QR generation behind the future backend API,
 - add integration tests once a disposable PostgreSQL database is available.
 
 The desktop client still uses direct DB access, so this should remain a transitional implementation until the API backend owns eCP issuance.

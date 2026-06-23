@@ -16,6 +16,14 @@ psql "$ESPELEO_TEST_DATABASE_URL" -f database/schema.sql
 
 The schema installs `pgcrypto`, creates the author-provided tables, sequences, indexes, and foreign keys, and keeps the `ecp_requests.ecp_record_id -> ecp_records.ecp_record_id` relationship that the desktop code now expects.
 
+## Migrations
+
+Existing databases should receive additive migrations from `database/migrations/`. The QR metadata migration adds signed eCP QR fields and Wallet status fields to `ecp_records`:
+
+```bash
+psql "$DATABASE_URL" -f database/migrations/2026-06-23-ecp-qr-metadata.sql
+```
+
 ## Integration Test
 
 The unit test suite always runs static schema checks. The PostgreSQL integration check runs only when this environment variable is set:

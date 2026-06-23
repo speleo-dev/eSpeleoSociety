@@ -21,6 +21,8 @@ The eCP issuance and approval flows now create an Ed25519-signed QR payload befo
 
 The QR image is uploaded as a PNG object under the `ecp_qr/` object prefix using the issued eCP hash as the object name. If signing configuration is missing, invalid, or the QR upload fails, the eCP is not activated.
 
+The database stores the QR URL, signing key id, signed payload, payload hash, issue timestamp, validity date, and Wallet issuance status on the eCP record. Existing databases need the QR metadata migration before this code path can run.
+
 ## Required Secrets
 
 Configure these secrets in the encrypted desktop secrets file:
@@ -57,6 +59,16 @@ Verification rejects:
 - invalid signatures,
 - expired `valid_until` dates,
 - unknown public keys for the key id.
+
+## Database Migration
+
+Apply the QR metadata migration to existing databases before issuing new eCP records:
+
+```bash
+psql "$DATABASE_URL" -f database/migrations/2026-06-23-ecp-qr-metadata.sql
+```
+
+The development bootstrap schema already includes these columns.
 
 ## Backend Migration Note
 

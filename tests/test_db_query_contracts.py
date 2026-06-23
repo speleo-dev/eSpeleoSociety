@@ -1,4 +1,5 @@
 import unittest
+from datetime import date, datetime
 
 import db
 from config import secret_manager
@@ -89,12 +90,23 @@ class DbQueryContractsTest(unittest.TestCase):
             "photo_hash": "photo-ref",
             "ecp_active": False,
             "check_hash": create_check_hash(),
+            "qr_url": "https://storage.example/ecp_qr/a.png",
+            "qr_key_id": "key-2026",
+            "qr_payload_hash": "c" * 64,
+            "issued_at": datetime(2026, 6, 23, 12, 0),
+            "valid_until": date(2027, 6, 23),
+            "wallet_status": "not_issued",
         })
 
         ecp_record = manager.fetch_ecp_record_by_id(33)
 
         self.assertEqual(ecp_record.ecp_id, 33)
         self.assertEqual(ecp_record.photo_hash, "photo-ref")
+        self.assertEqual(ecp_record.qr_url, "https://storage.example/ecp_qr/a.png")
+        self.assertEqual(ecp_record.qr_key_id, "key-2026")
+        self.assertEqual(ecp_record.qr_payload_hash, "c" * 64)
+        self.assertEqual(ecp_record.valid_until, date(2027, 6, 23))
+        self.assertEqual(ecp_record.wallet_status, "not_issued")
         self.assertIn("WHERE er.ecp_record_id = %s", manager.last_fetch_one_query)
         self.assertNotIn("er.member_id", manager.last_fetch_one_query)
 
@@ -106,6 +118,43 @@ class DbQueryContractsTest(unittest.TestCase):
         self.assertIn("WHERE ecp_record_id = %s", manager.last_execute_query)
         self.assertNotIn("WHERE photo_hash = %s", manager.last_execute_query)
         self.assertEqual(manager.last_execute_params, ("b" * 64, 33))
+
+    def test_update_ecp_record_issuance_persists_qr_metadata(self):
+        manager = RecordingDatabaseManager()
+        payload = {"kid": "key-2026", "claim": {"member_id": 22}}
+        issued_at = datetime(2026, 6, 23, 12, 0)
+        valid_until = date(2027, 6, 23)
+
+        manager.update_ecp_record_issuance(
+            ecp_record_id=33,
+            ecp_hash="b" * 64,
+            qr_url="https://storage.example/ecp_qr/b.png",
+            qr_key_id="key-2026",
+            qr_payload=payload,
+            qr_payload_hash="c" * 64,
+            issued_at=issued_at,
+            valid_until=valid_until,
+        )
+
+        for column_name in (
+            "qr_url",
+            "qr_key_id",
+            "qr_payload",
+            "qr_payload_hash",
+            "issued_at",
+            "valid_until",
+            "wallet_status",
+        ):
+            self.assertIn(column_name, manager.last_execute_query)
+        self.assertIn("WHERE ecp_record_id = %s", manager.last_execute_query)
+        self.assertEqual(manager.last_execute_params[0], "b" * 64)
+        self.assertEqual(manager.last_execute_params[1], "https://storage.example/ecp_qr/b.png")
+        self.assertEqual(manager.last_execute_params[2], "key-2026")
+        self.assertEqual(manager.last_execute_params[4], "c" * 64)
+        self.assertEqual(manager.last_execute_params[5], issued_at)
+        self.assertEqual(manager.last_execute_params[6], valid_until)
+        self.assertEqual(manager.last_execute_params[7], "not_issued")
+        self.assertEqual(manager.last_execute_params[-1], 33)
 
     def test_delete_ecp_record_by_id_targets_author_schema_primary_key(self):
         manager = RecordingDatabaseManager()

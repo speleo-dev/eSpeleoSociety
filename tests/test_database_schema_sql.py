@@ -43,6 +43,35 @@ class DatabaseSchemaSqlTest(unittest.TestCase):
         )[1].split(");", 1)[0]
         self.assertNotIn("photo_hash", ecp_requests_definition)
 
+    def test_schema_sql_contains_ecp_qr_metadata_columns(self):
+        schema = SCHEMA_PATH.read_text(encoding="utf-8")
+        ecp_records_definition = schema.split(
+            "CREATE TABLE IF NOT EXISTS public.ecp_records",
+            1,
+        )[1].split(");", 1)[0]
+
+        for expected_column in (
+            "qr_url text",
+            "qr_key_id character varying(100)",
+            "qr_payload jsonb",
+            "qr_payload_hash character varying(64)",
+            "issued_at timestamp",
+            "valid_until date",
+            "wallet_status character varying(30) DEFAULT 'not_issued'",
+            "wallet_object_id text",
+            "wallet_last_error text",
+        ):
+            self.assertIn(expected_column, ecp_records_definition)
+
+    def test_qr_metadata_migration_is_available(self):
+        migration = Path("database/migrations/2026-06-23-ecp-qr-metadata.sql").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("ALTER TABLE public.ecp_records", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS qr_url text", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS valid_until date", migration)
+
     def test_schema_sql_can_apply_to_configured_postgres(self):
         database_url = os.environ.get("ESPELEO_TEST_DATABASE_URL")
         if not database_url:

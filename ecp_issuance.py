@@ -1,6 +1,7 @@
 import base64
 from dataclasses import dataclass
 from datetime import date, datetime
+import hashlib
 from io import BytesIO
 import json
 from typing import Callable
@@ -30,6 +31,10 @@ class IssuedSignedEcpQr:
     qr_data: str
     qr_png: bytes
     blob_name: str
+    payload_hash: str
+    key_id: str
+    issued_at: datetime
+    valid_until: date
 
 
 def _normalise_pem(value: str) -> str:
@@ -97,6 +102,8 @@ def issue_signed_ecp_qr(
     issued_at: datetime | None = None,
     ecp_hash: str | None = None,
 ) -> IssuedSignedEcpQr:
+    if issued_at is None:
+        issued_at = datetime.now().astimezone()
     claim = create_ecp_claim(
         member_id=getattr(member, "member_id"),
         display_name=member_display_name(member),
@@ -114,6 +121,10 @@ def issue_signed_ecp_qr(
         qr_data=qr_data,
         qr_png=_qr_png_bytes(qr_data),
         blob_name=f"ecp_qr/{blob_hash}.png",
+        payload_hash=hashlib.sha256(qr_data.encode("utf-8")).hexdigest(),
+        key_id=key_id,
+        issued_at=issued_at,
+        valid_until=valid_until,
     )
 
 

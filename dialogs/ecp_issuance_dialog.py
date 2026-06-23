@@ -143,7 +143,7 @@ class ECPIssuanceDialog(QDialog):
         new_ecp_hash = secrets.token_hex(32)
         try:
             primary_club = db.db_manager.fetch_club_by_id(self.member.primary_club_id) if self.member.primary_club_id else None
-            issue_and_upload_signed_ecp_qr(
+            issued_qr, qr_url = issue_and_upload_signed_ecp_qr(
                 member=self.member,
                 club=primary_club,
                 ecp_hash=new_ecp_hash,
@@ -159,9 +159,22 @@ class ECPIssuanceDialog(QDialog):
         check_hash_val = utils.create_check_hash()
         # Assuming Ecp constructor uses translated attribute names
         ecp_obj = Ecp(ecp_hash=self.member.ecp_hash, gdpr_consent=True, notifications_enabled=True,
-                      photo_hash=photo_hash_val, is_ecp_active=True, 
+                      photo_hash=photo_hash_val, is_ecp_active=False,
                       check_hash=check_hash_val, member_id=self.member.member_id)
-        db.db_manager.insert_ecp(ecp_obj) # Example: inserting ECP record
+        ecp_record_id = db.db_manager.insert_ecp(ecp_obj) # Example: inserting ECP record
+        if not ecp_record_id:
+            show_error_message(self.tr("Cannot issue eCP: failed to create eCP record."))
+            return
+        db.db_manager.update_ecp_record_issuance(
+            ecp_record_id=ecp_record_id,
+            ecp_hash=self.member.ecp_hash,
+            qr_url=qr_url,
+            qr_key_id=issued_qr.key_id,
+            qr_payload=issued_qr.payload,
+            qr_payload_hash=issued_qr.payload_hash,
+            issued_at=issued_qr.issued_at,
+            valid_until=issued_qr.valid_until,
+        )
         db.db_manager.update_member_ecp_hash(self.member.member_id, self.member.ecp_hash)
         QMessageBox.information(self, self.tr("eCP Issued"), self.tr("eCP has been issued and photo saved."))
         self.accept()

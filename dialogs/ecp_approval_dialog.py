@@ -82,7 +82,16 @@ class ECPApprovalDialog(QDialog):
             show_error_message(self.tr(f"Cannot approve signed eCP QR: {exc}"))
             return
 
-        db.db_manager.update_ecp_record_on_approval(self.ecp_record.ecp_id, new_generated_ecp_hash)
+        db.db_manager.update_ecp_record_issuance(
+            ecp_record_id=self.ecp_record.ecp_id,
+            ecp_hash=new_generated_ecp_hash,
+            qr_url=qr_url,
+            qr_key_id=issued_qr.key_id,
+            qr_payload=issued_qr.payload,
+            qr_payload_hash=issued_qr.payload_hash,
+            issued_at=issued_qr.issued_at,
+            valid_until=issued_qr.valid_until,
+        )
         db.db_manager.update_member_ecp_hash(self.member.member_id, new_generated_ecp_hash)
         db.db_manager.update_ecp_request_status(self.req_details.request_id, "approved")
         

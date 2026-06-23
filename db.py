@@ -398,12 +398,23 @@ class DatabaseManager:
             is_ecp_active=row['ecp_active'],
             check_hash=row['check_hash'],
             member_id=self._row_get(row, 'member_id', member_id),
-            ecp_id=row['ecp_record_id']
+            ecp_id=row['ecp_record_id'],
+            qr_url=self._row_get(row, 'qr_url'),
+            qr_key_id=self._row_get(row, 'qr_key_id'),
+            qr_payload_hash=self._row_get(row, 'qr_payload_hash'),
+            issued_at=self._row_get(row, 'issued_at'),
+            valid_until=self._row_get(row, 'valid_until'),
+            wallet_status=self._row_get(row, 'wallet_status'),
+            wallet_object_id=self._row_get(row, 'wallet_object_id'),
+            wallet_last_error=self._row_get(row, 'wallet_last_error'),
         )
 
     def fetch_ecp(self, hash_ecp: str) -> Ecp:
         query = """
-        SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled, er.photo_hash, er.ecp_active, er.check_hash, m.member_id
+        SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
+               er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
+               er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
+               er.wallet_object_id, er.wallet_last_error, m.member_id
         FROM ecp_records er
         JOIN members m ON m.ecp_hash = er.ecp_hash
         WHERE er.ecp_hash = %s;
@@ -415,7 +426,10 @@ class DatabaseManager:
 
     def fetch_ecp_record_by_photo_hash(self, photo_hash: str) -> Ecp: # New method
         query = """
-        SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled, er.photo_hash, er.ecp_active, er.check_hash
+        SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
+               er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
+               er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
+               er.wallet_object_id, er.wallet_last_error
         FROM ecp_records er
         WHERE er.photo_hash = %s;
         """
@@ -426,7 +440,10 @@ class DatabaseManager:
 
     def fetch_ecp_record_by_id(self, ecp_record_id: int) -> Ecp:
         query = """
-        SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled, er.photo_hash, er.ecp_active, er.check_hash
+        SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
+               er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
+               er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
+               er.wallet_object_id, er.wallet_last_error
         FROM ecp_records er
         WHERE er.ecp_record_id = %s;
         """
@@ -668,6 +685,46 @@ class DatabaseManager:
         params = (new_generated_ecp_hash, ecp_record_id)
         self._execute(query, params)
         self._log_action("UPDATE", "ecp_records", "Approved eCP record")
+
+    def update_ecp_record_issuance(
+        self,
+        ecp_record_id: int,
+        ecp_hash: str,
+        qr_url: str,
+        qr_key_id: str,
+        qr_payload: dict,
+        qr_payload_hash: str,
+        issued_at,
+        valid_until,
+        wallet_status: str = "not_issued",
+    ):
+        query = """
+        UPDATE ecp_records
+        SET ecp_hash = %s,
+            ecp_active = TRUE,
+            qr_url = %s,
+            qr_key_id = %s,
+            qr_payload = %s,
+            qr_payload_hash = %s,
+            issued_at = %s,
+            valid_until = %s,
+            wallet_status = %s,
+            wallet_last_error = NULL
+        WHERE ecp_record_id = %s;
+        """
+        params = (
+            ecp_hash,
+            qr_url,
+            qr_key_id,
+            psycopg2.extras.Json(qr_payload),
+            qr_payload_hash,
+            issued_at,
+            valid_until,
+            wallet_status,
+            ecp_record_id,
+        )
+        self._execute(query, params)
+        self._log_action("UPDATE", "ecp_records", "Updated eCP issuance metadata")
 
     def update_member_ecp_hash(self, member_id: int, new_generated_ecp_hash: str):
         query = """
