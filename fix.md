@@ -24,6 +24,11 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 
 ## Completed Fixes
 
+### Technical Documentation
+
+- Added a top-level project entry point with links to the main technical documents.
+- Added a detailed technical manual covering the current product concept, architecture, UI flows, database tables, eCP issuance, SEPA processing, audit logging, security model, testing, local DB setup, known technical debt, and API/OAuth2 roadmap.
+
 ### Runtime Environment
 
 - Added a dependency manifest for the current PyQt desktop application.
