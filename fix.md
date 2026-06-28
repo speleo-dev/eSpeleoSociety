@@ -98,9 +98,19 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 - Added signing fields to the secrets setup dialog.
 - Added documentation for signing key generation, required secrets, offline verification, and the transitional backend migration caveat.
 
+### Project Input Configuration And SMTP Notifications
+
+- Ignored the local `docs/projekt/` directory because it contains email exports, screenshots, and plaintext configuration with sensitive values.
+- Added missing setup fields from the original configuration screen: Google Wallet issuer ID, SMTP server, SMTP port, SMTP user, SMTP password, and log level.
+- Masked DB password, SMTP password, crypt key, and eCP signing private key fields in the setup dialog.
+- Added a testable SMTP notification module.
+- Wired direct eCP issuance and eCP request approval to attempt an email notification after successful issuance.
+- Email notification failure is warning-only and does not roll back an already issued or approved eCP.
+
 ## Not Yet Done
 
 - Google Wallet integration is still a placeholder.
+- SMTP notification is still desktop-side and has no backend outbox, retry, or delivery history.
 - The eCP private signing key still lives in the desktop secrets file as a transitional step; final signing should move behind the API backend.
 - The desktop client still uses direct database access; the API/OAuth2 migration is documented but not implemented.
 - The database is not yet protected behind a backend-only network boundary.

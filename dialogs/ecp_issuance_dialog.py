@@ -9,6 +9,7 @@ from PyQt5.QtCore import QIODevice, QBuffer, Qt # Qt added to imports from QtCor
 from model import Ecp, Member # Import Member model
 import db
 from config import secret_manager
+from email_notifications import EmailNotificationError, send_ecp_issued_email
 from ecp_issuance import EcpQrUploadError, EcpSigningConfigError, issue_and_upload_signed_ecp_qr
 from utils import get_icon, upload_photo_to_bucket, upload_to_bucket, show_error_message, show_warning_message
 import utils # Pre prístup k utils.create_check_hash
@@ -176,5 +177,13 @@ class ECPIssuanceDialog(QDialog):
             valid_until=issued_qr.valid_until,
         )
         db.db_manager.update_member_ecp_hash(self.member.member_id, self.member.ecp_hash)
-        QMessageBox.information(self, self.tr("eCP Issued"), self.tr("eCP has been issued and photo saved."))
+        email_warning = None
+        try:
+            send_ecp_issued_email(self.member, issued_qr, secret_manager.get_secret)
+        except EmailNotificationError as exc:
+            email_warning = self.tr(f"eCP was issued, but email notification failed: {exc}")
+        if email_warning:
+            QMessageBox.warning(self, self.tr("eCP Issued"), email_warning)
+        else:
+            QMessageBox.information(self, self.tr("eCP Issued"), self.tr("eCP has been issued and photo saved."))
         self.accept()

@@ -13,6 +13,8 @@ class EcpFlowWiringTest(unittest.TestCase):
         self.assertIn("upload_to_bucket", approval_source)
         self.assertIn("update_ecp_record_issuance", issuance_source)
         self.assertIn("update_ecp_record_issuance", approval_source)
+        self.assertIn("send_ecp_issued_email", issuance_source)
+        self.assertIn("send_ecp_issued_email", approval_source)
 
 
 if __name__ == "__main__":
