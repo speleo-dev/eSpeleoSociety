@@ -56,6 +56,7 @@ Prakticky pouzitelne casti dnes:
 - eCP QR obrazok sa nahrava do GCS,
 - eCP QR metadata sa ukladaju do databazy,
 - po vydani alebo schvaleni eCP sa aplikacia pokusi poslat SMTP email clenovi,
+- DB schema a zapisove metody chrania jeden primarny klub na clena a jeden poplatok na clena/rok/typ,
 - test suite pokryva stabilizovane oblasti bez potreby produkcnych secrets.
 
 Casti, ktore dnes este nefunguju ako finalny produkt:
@@ -464,16 +465,9 @@ Vztahy:
 
 Dolezita medzera:
 
-- Schema zatial nevynucuje, ze clen ma najviac jeden primarny klub.
-- Kod vie nastavit primarny klub, ale SQL constraint by mal do buducna zabranit dvom primarnym klubom pre jedneho clena.
-
-Odporucany buduci constraint:
-
-```sql
-CREATE UNIQUE INDEX one_primary_club_per_member
-ON club_affiliations(member_id)
-WHERE is_primary_club = true;
-```
+- Schema uz vynucuje, ze clen ma najviac jeden primarny klub.
+- Kod pri zmene primarneho klubu vypne ostatne primarne afiliacie toho clena.
+- Vlozenie existujucej dvojice clen/klub je idempotentne cez `ON CONFLICT`.
 
 ### membership_fees
 
@@ -504,11 +498,12 @@ Aktualna logika:
 
 Dolezite medzery:
 
-- Neexistuje unikatny constraint na `member_id`, `year`, `fee_type`.
 - Neexistuje plny ledger importovanych bankovych transakcii.
 - Neuklada sa suma, mena, datum zauctovania, IBAN odosielatela, identifikator transakcie ani identifikator vypisu.
 
 Pre realnu uctovnu stopu treba neskor doplnit samostatny payment ledger.
+
+Aktualne je chranene, aby pre rovnakeho clena, rok a typ poplatku nevznikli duplicitne riadky. Opakovany insert poplatku je idempotentny.
 
 ### ecp_records
 
@@ -691,20 +686,20 @@ Aktualne existuju:
 - unikatny index na `clubs.email`,
 - unikatny index na `ecp_records.ecp_hash`,
 - index na `member_certificates.member_id`,
+- index na `club_affiliations.club_id`,
+- unique partial index na `club_affiliations.member_id` pre jeden primarny klub,
+- unique index na `membership_fees(member_id, year, fee_type)`,
 - index na `ecp_records.valid_until`,
 - index na `ecp_records.wallet_status`,
 - foreign keys pre klubove prislusnosti, predsedu, eCP requesty, certifikaty a poplatky.
 
 Odporucane doplnenia:
 
-- index na `club_affiliations.club_id`,
 - index na `clubs.president_id`,
 - index na `ecp_requests.status, request_date`,
 - index na `ecp_requests.ecp_record_id`,
 - index na `membership_fees.member_id, year`,
 - index alebo trigram pre hladanie v `members.last_name, first_name`,
-- unique constraint pre jeden poplatok na clena/rok/typ,
-- partial unique constraint pre jeden primarny klub na clena,
 - check constraint pre `ecp_requests.status`,
 - check constraint pre `wallet_status`,
 - unique constraint alebo index pre `ecp_records.photo_hash`.

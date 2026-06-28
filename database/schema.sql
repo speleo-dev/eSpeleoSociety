@@ -108,6 +108,13 @@ CREATE TABLE IF NOT EXISTS public.club_affiliations (
     CONSTRAINT club_affiliations_pkey PRIMARY KEY (member_id, club_id)
 );
 
+CREATE UNIQUE INDEX idx_club_affiliations_one_primary
+    ON public.club_affiliations USING btree (member_id)
+    WHERE is_primary_club;
+
+CREATE INDEX idx_club_affiliations_club_id
+    ON public.club_affiliations USING btree (club_id);
+
 CREATE TABLE IF NOT EXISTS public.db_logs (
     log_id integer DEFAULT nextval('public.db_logs_log_id_seq'::regclass) NOT NULL,
     action character varying(50),
@@ -191,6 +198,9 @@ CREATE TABLE IF NOT EXISTS public.membership_fees (
 );
 
 ALTER SEQUENCE public.membership_fees_fee_id_seq OWNED BY public.membership_fees.fee_id;
+
+CREATE UNIQUE INDEX idx_membership_fees_member_year_type
+    ON public.membership_fees USING btree (member_id, year, fee_type);
 
 CREATE TABLE IF NOT EXISTS public.notifications (
     notification_id integer DEFAULT nextval('public.notifications_notification_id_seq'::regclass) NOT NULL,

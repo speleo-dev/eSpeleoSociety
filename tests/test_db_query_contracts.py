@@ -183,6 +183,32 @@ class DbQueryContractsTest(unittest.TestCase):
         self.assertIn("RETURNING ecp_record_id", manager.last_fetch_one_query)
         self.assertEqual(ecp.ecp_id, 33)
 
+    def test_set_primary_membership_clears_other_primary_clubs_for_member(self):
+        manager = RecordingDatabaseManager()
+
+        manager.set_primary_memberships(member_id=22, club_id=33)
+
+        self.assertIn("CASE WHEN club_id = %s THEN TRUE ELSE FALSE END", manager.last_execute_query)
+        self.assertIn("WHERE member_id = %s", manager.last_execute_query)
+        self.assertEqual(manager.last_execute_params, (33, 22))
+
+    def test_insert_membership_is_idempotent_for_existing_member_club_pair(self):
+        manager = RecordingDatabaseManager()
+
+        manager.insert_memberships(member_id=22, club_id=33, primary_club=False)
+
+        self.assertIn("ON CONFLICT (member_id, club_id)", manager.last_execute_query)
+        self.assertEqual(manager.last_execute_params, (22, 33, False))
+
+    def test_insert_fee_record_is_idempotent_per_member_year_and_type(self):
+        manager = RecordingDatabaseManager()
+
+        manager.insert_fee_record(member_id=22, year=2026, hash_ecp="a" * 64)
+
+        self.assertIn("fee_type", manager.last_execute_query)
+        self.assertIn("ON CONFLICT (member_id, year, fee_type) DO NOTHING", manager.last_execute_query)
+        self.assertEqual(manager.last_execute_params, (22, "a" * 64, 2026, "standard"))
+
 
 if __name__ == "__main__":
     unittest.main()

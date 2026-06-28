@@ -72,6 +72,23 @@ class DatabaseSchemaSqlTest(unittest.TestCase):
         self.assertIn("ADD COLUMN IF NOT EXISTS qr_url text", migration)
         self.assertIn("ADD COLUMN IF NOT EXISTS valid_until date", migration)
 
+    def test_schema_sql_contains_membership_integrity_indexes(self):
+        schema = SCHEMA_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("idx_club_affiliations_one_primary", schema)
+        self.assertIn("ON public.club_affiliations USING btree (member_id)", schema)
+        self.assertIn("WHERE is_primary_club", schema)
+        self.assertIn("idx_membership_fees_member_year_type", schema)
+        self.assertIn("ON public.membership_fees USING btree (member_id, year, fee_type)", schema)
+
+    def test_membership_integrity_migration_is_available(self):
+        migration = Path("database/migrations/2026-06-28-membership-integrity.sql").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("idx_club_affiliations_one_primary", migration)
+        self.assertIn("idx_membership_fees_member_year_type", migration)
+
     def test_schema_sql_can_apply_to_configured_postgres(self):
         database_url = os.environ.get("ESPELEO_TEST_DATABASE_URL")
         if not database_url:
