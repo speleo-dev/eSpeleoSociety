@@ -1,0 +1,9 @@
+PyQt5
+Babel
+cryptography
+google-cloud-storage
+Pillow
+psycopg2-binary
+pycryptodome
+qrcode
+requests

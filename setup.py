@@ -137,7 +137,9 @@ class SecretSetupGUI(QWidget):
             ("project_id", "Google Cloud project:"),
             ("bucket_name", "Bucket name:"),
             ("logo_pic", "Society Logo file:"),
-            ("crypt_key", "Crypt key:")
+            ("crypt_key", "Crypt key:"),
+            ("ecp_signing_key_id", "eCP signing key ID:"),
+            ("ecp_signing_private_key_b64", "eCP signing private key (base64 PEM):")
         ]
 
         row = 0
@@ -147,7 +149,7 @@ class SecretSetupGUI(QWidget):
             entry.setFixedHeight(32) # Increase field height
             entry.setMinimumWidth(500) # Adjust minimum field width
             entry.setAlignment(Qt.AlignLeft)
-            if key == "crypt_key":
+            if key in ("crypt_key", "ecp_signing_private_key_b64"):
                 entry.setEchoMode(QLineEdit.Password)
             grid.addWidget(label, row, 0)
             grid.addWidget(entry, row, 1)

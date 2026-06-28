@@ -1,11 +1,13 @@
 # views/sepa_import_view.py
 from datetime import datetime
+from decimal import Decimal
 from PyQt5.QtWidgets import ( 
     QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt5.QtGui import QColor
 from utils import parse_camt053, get_table_header_stylesheet, get_iban, get_membership_fee_normal, get_membership_fee_discounted, show_info_message, show_warning_message, show_error_message, show_success_message, encrypt_fee_reference
+from sepa_processing import process_transactions
 import db # Potrebujeme pre prístup k databáze
 
 
@@ -76,62 +78,15 @@ class SepaImportView(QWidget):
             show_success_message(self.tr("SEPA file processed. You can now save valid payments."))
 
     def process_transactions(self, parsed_data: dict) -> list:
-        normal_fee = get_membership_fee_normal()
-        discounted_fee = get_membership_fee_discounted()
-        processed_transactions = []
-        for tx_data in parsed_data.get('transactions', []):
-            processed_tx = {
-                'ecp_hash_display': tx_data.get('ecp_hash_candidate', self.tr("N/A")),
-                'name_or_iban': "",
-                'amount': 0.0,
-                'currency': tx_data.get('currency', ''),
-                'payment_date': tx_data.get('transaction_date', self.tr('N/A')),
-                'bg_color': QColor("white"), 
-                'text_color': QColor("black") 
-            }
-            try:
-                tx_amount = float(tx_data.get('amount', 0))
-                processed_tx['amount'] = tx_amount
-            except ValueError:
-                processed_tx['bg_color'] = QColor("lightgray") # Sivé pozadie pre nevalidnú sumu
-                processed_tx['name_or_iban'] = self.tr("Invalid amount in transaction")
-                processed_transactions.append(processed_tx)
-                continue
-
-            ecp_hash = tx_data.get('ecp_hash_candidate')
-            member = None
-            ecp_record = None
-
-            if ecp_hash:
-                ecp_record = db.db_manager.fetch_ecp(ecp_hash)
-                if ecp_record:
-                    member = db.db_manager.fetch_member_by_id(ecp_record.member_id)
-
-            if member and ecp_record:
-                processed_tx['name_or_iban'] = f"{member.first_name} {member.last_name}"
-                expected_fee = discounted_fee if member.discounted_membership else normal_fee
-
-                if ecp_record.is_ecp_active:
-                    if abs(tx_amount - expected_fee) < 0.001: # Porovnanie floatov
-                        processed_tx['bg_color'] = QColor("lightgreen")
-                    elif tx_amount < expected_fee:
-                        processed_tx['bg_color'] = QColor("salmon") # Svetlo červená
-                    else: # tx_amount > expected_fee
-                        processed_tx['bg_color'] = QColor("lightblue")
-                else: # ecp_record not active
-                    if abs(tx_amount - normal_fee) < 0.001 or abs(tx_amount - discounted_fee) < 0.001:
-                        processed_tx['bg_color'] = QColor("yellow")
-                    else: # Neaktívny ECP, nesprávna suma
-                        processed_tx['bg_color'] = QColor("lightgray") 
-            else: # ecp_hash chýba, alebo ecp_record nenájdený, alebo člen nenájdený
-                processed_tx['bg_color'] = QColor("lightgray")
-                processed_tx['name_or_iban'] = tx_data.get('debtor_account_iban', self.tr('N/A'))
-                if abs(tx_amount - normal_fee) < 0.001 or abs(tx_amount - discounted_fee) < 0.001:
-                    processed_tx['text_color'] = QColor("darkGreen")
-                else:
-                    processed_tx['text_color'] = QColor("red")
-            
-            processed_transactions.append(processed_tx)
+        return process_transactions(
+            parsed_data,
+            normal_fee=Decimal(str(get_membership_fee_normal())),
+            discounted_fee=Decimal(str(get_membership_fee_discounted())),
+            fetch_ecp=db.db_manager.fetch_ecp,
+            fetch_member_by_id=db.db_manager.fetch_member_by_id,
+            empty_label=self.tr("N/A"),
+            invalid_amount_label=self.tr("Invalid amount in transaction"),
+        )
 
     def save_payments(self):
         if not hasattr(self, 'processed_transactions') or not self.processed_transactions:
@@ -139,14 +94,15 @@ class SepaImportView(QWidget):
             return
 
         saved_count = 0
+        current_year = datetime.now().year
         for tx in self.processed_transactions:
-            if tx['bg_color'] == QColor("lightgreen") and tx['ecp_hash_display'] != self.tr("N/A"):  # Len úspešné platby
+            if tx.get('status') == "valid" and tx['ecp_hash_display'] != self.tr("N/A"):  # Len úspešné platby
                 ecp_hash = tx['ecp_hash_display']
                 member = db.db_manager.fetch_member_by_hash(ecp_hash)
                 if member:
-                    encrypted_ref = encrypt_fee_reference(ecp_hash, datetime.datetime.now().year)
+                    encrypted_ref = encrypt_fee_reference(ecp_hash, current_year)
                     if encrypted_ref:
-                        db.db_manager.insert_fee_record(member.member_id, datetime.datetime.now().year, encrypted_ref)
+                        db.db_manager.insert_fee_record(member.member_id, current_year, encrypted_ref)
                         saved_count += 1
         
         if saved_count > 0:
@@ -170,8 +126,8 @@ class SepaImportView(QWidget):
             items = [ecp_item, name_iban_item, amount_item, currency_item, date_item]
 
             for col_idx, item in enumerate(items):
-                item.setBackground(tx_info['bg_color'])
-                item.setForeground(tx_info['text_color'])
+                item.setBackground(QColor(tx_info['bg_color']))
+                item.setForeground(QColor(tx_info['text_color']))
                 self.table.setItem(row_idx, col_idx, item)
         
         self.table.resizeColumnsToContents()
