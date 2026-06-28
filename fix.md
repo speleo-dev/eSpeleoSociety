@@ -107,6 +107,14 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 - Wired direct eCP issuance and eCP request approval to attempt an email notification after successful issuance.
 - Email notification failure is warning-only and does not roll back an already issued or approved eCP.
 
+### Club And Member Integrity
+
+- Changed primary club updates so selecting a new primary club clears other primary club flags for the same member.
+- Made member-club affiliation inserts idempotent with `ON CONFLICT`.
+- Made membership fee inserts idempotent per member/year/fee type.
+- Added a membership integrity migration that collapses existing duplicate primary-club and fee rows before creating unique indexes.
+- Updated the development/test schema with the new integrity indexes.
+
 ## Not Yet Done
 
 - Google Wallet integration is still a placeholder.

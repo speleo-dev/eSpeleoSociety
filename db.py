@@ -626,15 +626,21 @@ class DatabaseManager:
     def insert_memberships(self, member_id: int, club_id: int, primary_club: bool = False):
         query = """
         INSERT INTO club_affiliations (member_id, club_id, is_primary_club)
-        VALUES (%s, %s, %s);
+        VALUES (%s, %s, %s)
+        ON CONFLICT (member_id, club_id)
+        DO UPDATE SET is_primary_club = club_affiliations.is_primary_club OR EXCLUDED.is_primary_club;
         """
         params = (member_id, club_id, primary_club)
         self._execute(query, params)
         self._log_action("INSERT", "club_affiliations", f"Inserted membership for member ID {member_id} in club ID {club_id}, primary: {primary_club}")
 
     def set_primary_memberships(self, member_id: int, club_id: int):
-        query = "UPDATE club_affiliations SET is_primary_club = %s WHERE member_id = %s AND club_id = %s;"
-        params = (True, member_id, club_id)
+        query = """
+        UPDATE club_affiliations
+        SET is_primary_club = CASE WHEN club_id = %s THEN TRUE ELSE FALSE END
+        WHERE member_id = %s;
+        """
+        params = (club_id, member_id)
         self._execute(query, params)
         self._log_action("UPDATE", "club_affiliations", f"Set primary membership for member ID {member_id} in club ID {club_id}")
 
@@ -644,9 +650,13 @@ class DatabaseManager:
         self._execute(query, params)
         self._log_action("DELETE", "club_affiliations", f"Deleted membership for member ID {member_id} in club ID {club_id}")
 
-    def insert_fee_record(self, member_id: int, year: int, hash_ecp: str = None):
-        query = "INSERT INTO membership_fees (member_id, ecp_hash, year) VALUES (%s, %s, %s);"
-        params = (member_id, hash_ecp, year)
+    def insert_fee_record(self, member_id: int, year: int, hash_ecp: str = None, fee_type: str = "standard"):
+        query = """
+        INSERT INTO membership_fees (member_id, ecp_hash, year, fee_type)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (member_id, year, fee_type) DO NOTHING;
+        """
+        params = (member_id, hash_ecp, year, fee_type)
         self._execute(query, params)
         self._log_action("INSERT", "membership_fees", f"Inserted fee record for member ID {member_id} for year {year}")
 

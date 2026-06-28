@@ -78,7 +78,6 @@ The schema supports a basic desktop administration flow, but it is not yet enoug
 
 Potentially useful indexes before the backend exposes list/search endpoints:
 
-- `club_affiliations(club_id)` for club member lists.
 - `clubs(president_id)` for president scope lookups.
 - `ecp_requests(status, request_date)` for pending request queues.
 - `ecp_requests(ecp_record_id)` because it is a foreign key and join column.
@@ -88,11 +87,16 @@ Potentially useful indexes before the backend exposes list/search endpoints:
 
 Potential constraints:
 
-- Only one primary club per member.
-- Unique fee per member/year/fee type.
 - Non-empty email uniqueness should be partial rather than `UNIQUE(email)` with empty string defaults.
 - Request status should be constrained to the allowed workflow states.
 - `ecp_records.photo_hash` should probably be unique if one uploaded photo maps to one eCP record.
+
+Integrity already added after this initial analysis:
+
+- `club_affiliations(club_id)` index for club member lists.
+- Partial unique index allowing only one primary club per member.
+- Unique fee index for one fee row per member/year/fee type.
+- Desktop write methods use idempotent inserts for memberships and fee rows.
 
 ## Backend Migration Implications
 

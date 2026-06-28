@@ -24,6 +24,12 @@ Existing databases should receive additive migrations from `database/migrations/
 psql "$DATABASE_URL" -f database/migrations/2026-06-23-ecp-qr-metadata.sql
 ```
 
+The membership integrity migration collapses duplicate primary-club and fee records before adding indexes that enforce one primary club per member and one fee row per member/year/fee type:
+
+```bash
+psql "$DATABASE_URL" -f database/migrations/2026-06-28-membership-integrity.sql
+```
+
 ## Integration Test
 
 The unit test suite always runs static schema checks. The PostgreSQL integration check runs only when this environment variable is set:
