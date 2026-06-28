@@ -55,6 +55,7 @@ Prakticky pouzitelne casti dnes:
 - eCP issuance generuje podpisany offline overitelny QR payload,
 - eCP QR obrazok sa nahrava do GCS,
 - eCP QR metadata sa ukladaju do databazy,
+- po vydani alebo schvaleni eCP sa aplikacia pokusi poslat SMTP email clenovi,
 - test suite pokryva stabilizovane oblasti bez potreby produkcnych secrets.
 
 Casti, ktore dnes este nefunguju ako finalny produkt:
@@ -139,14 +140,20 @@ Secrets su ulozene lokalne v sifrovanom subore. Subor sa sifruje PINom cez PBKDF
 | `db_user` | DB pouzivatel |
 | `db_password` | DB heslo |
 | `credentials_json` | Google service account credentials |
+| `google_wallet_issuer_id` | Issuer ID pre buducu Google Wallet integraciu |
 | `project_id` | Google Cloud project |
 | `bucket_name` | GCS bucket pre fotky, loga a QR obrazky |
 | `logo_pic` | Nazov objektu loga organizacie |
 | `crypt_key` | Symetricky kluc pre niektore lokalne/DB kryptograficke operacie |
+| `smtp_server` | SMTP server pre email notifikacie |
+| `smtp_port` | SMTP port, typicky 587 pre STARTTLS |
+| `smtp_user` | SMTP prihlasovacie meno |
+| `smtp_password` | SMTP heslo alebo app password |
+| `log_level` | Zakladna uroven logovania pre buduce pouzitie |
 | `ecp_signing_key_id` | Identifikator eCP podpisovacieho kluca |
 | `ecp_signing_private_key_b64` | Base64 PEM privatny Ed25519 kluc pre podpis eCP QR |
 
-Dolezita poznamka: DB heslo, service account JSON a privatny eCP podpisovaci kluc nemaju dlhodobo zostat v desktop klientovi. Patri to do backend secret managementu.
+Dolezita poznamka: DB heslo, SMTP heslo, service account JSON a privatny eCP podpisovaci kluc nemaju dlhodobo zostat v desktop klientovi. Patri to do backend secret managementu.
 
 ### Application Settings
 
@@ -767,6 +774,8 @@ Pri vydani eCP priamo z clenskeho dialogu:
 
 Ak chyba podpisovaci kluc alebo QR upload zlyha, eCP sa neaktivuje.
 
+Po uspesnom DB zapise sa aplikacia pokusi odoslat email clenovi cez SMTP. Zlyhanie emailu sa zobrazi ako warning a nesposobi rollback uz vydaneho eCP. Toto je prechodne desktopove riesenie; finalny stav ma posielat email z backendu.
+
 ### eCP Request Approval Flow
 
 Pri schvaleni ziadosti:
@@ -783,6 +792,8 @@ Pri schvaleni ziadosti:
 
 Transakcnost je zatial obmedzena. DB update, GCS upload a Wallet stav nie su este riadene backendovou transakcnou orchestriou.
 
+Po schvaleni sa aplikacia pokusi poslat SMTP email clenovi. Ak email zlyha, ziadost zostane schvalena a pouzivatel dostane warning, aby mohol clenovi napisat manualne alebo chybu riesit v SMTP nastaveniach.
+
 ### eCP Request Rejection Flow
 
 Pri zamietnuti:
@@ -793,6 +804,33 @@ Pri zamietnuti:
 4. Dialog sa zavrie ako spracovany.
 
 Ak zlyha mazanie GCS objektu, aktualne je to logovane cez vypis, nie cez robustny retry mechanizmus.
+
+## SMTP Email Notifications
+
+SMTP notifikacia riesi problem, ze Google Wallet sam o sebe clena neinformuje o vystaveni eCP. Aktualna implementacia posiela jednoduchy email po direct eCP issuance a po approval flow.
+
+SMTP konfiguracia je ulozena v encrypted secrets:
+
+- `smtp_server`,
+- `smtp_port`,
+- `smtp_user`,
+- `smtp_password`.
+
+Sprava obsahuje:
+
+- meno clena,
+- informaciu, ze eCP bol vystaveny,
+- datum platnosti, ak je dostupny,
+- zakladny kontakt na spravcu/klub.
+
+Sprava zamerne neposiela privatne kluce ani DB identifikatory. QR URL sa do emailu neposiela ako produktove rozhodnutie, kym nebude jasne, ci ma byt verejne pristupne alebo chranene backendom.
+
+Medzery:
+
+- email sa neposiela backendom,
+- zlyhanie sa iba zobrazi ako warning,
+- neexistuje email outbox, retry ani historia dorucenia,
+- SMTP credentials su stale v desktop secrets.
 
 ## Google Wallet Status
 
@@ -909,6 +947,7 @@ Hlavne rizika aktualnej architektury:
 
 - desktop ma DB heslo,
 - desktop ma Google service account credentials,
+- desktop ma SMTP credentials,
 - desktop ma privatny eCP podpisovaci kluc,
 - PostgreSQL musi byt dostupny z klientskych pocitacov,
 - autorizacia nie je OAuth2/OIDC,
@@ -923,6 +962,7 @@ Ciel:
 
 - desktop a portaly nemaju DB credentials,
 - desktop a portaly nemaju service account JSON,
+- desktop a portaly nemaju SMTP credentials,
 - desktop a portaly nemaju privatne podpisovacie kluce,
 - vsetky zapisy idu cez backend API,
 - backend robi autorizaciu na urovni objektov,
@@ -1014,6 +1054,7 @@ Backend ma vlastnit:
 - DB connection pool,
 - autorizacne pravidla,
 - audit log,
+- email outbox a SMTP/transactional-email integraciu,
 - eCP signing,
 - Google Cloud upload,
 - Google Wallet issuance,
@@ -1063,6 +1104,7 @@ Najdolezitejsie dlhy:
 - Ziadna API vrstva.
 - Ziadne OAuth2 roly.
 - Ziadny portal.
+- SMTP notifikacie su desktopove a bez outbox/retry mechanizmu.
 - Google Wallet placeholder.
 - Neplny payment ledger.
 - Nejednoznacne pouzitie `membership_fees.ecp_hash`.

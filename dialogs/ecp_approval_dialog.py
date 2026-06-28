@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayo
 from PyQt5.QtGui import QPixmap, QIcon
 from model import EcpRequest
 import db
+from email_notifications import EmailNotificationError, send_ecp_issued_email
 from ecp_issuance import EcpQrUploadError, EcpSigningConfigError, issue_and_upload_signed_ecp_qr
 from utils import get_icon, load_image_from_url, send_to_google_wallet, delete_photo_from_bucket, upload_to_bucket, show_success_message, show_error_message
 from config import secret_manager # For access to bucket name
@@ -102,7 +103,15 @@ class ECPApprovalDialog(QDialog):
         self.req_details.signed_qr_url = qr_url
 
         send_to_google_wallet(self.req_details) # Placeholder
-        show_success_message(self.tr("The request has been approved."))
+        email_warning = None
+        try:
+            send_ecp_issued_email(self.member, issued_qr, secret_manager.get_secret)
+        except EmailNotificationError as exc:
+            email_warning = self.tr(f"The request was approved, but email notification failed: {exc}")
+        if email_warning:
+            QMessageBox.warning(self, self.tr("Email Notification Failed"), email_warning)
+        else:
+            show_success_message(self.tr("The request has been approved."))
         self.accept() # Zatvorí dialóg
 
     def reject_request(self):

@@ -18,6 +18,8 @@ SENSITIVE_LOG_KEYS = (
     "email",
     "phone",
     "photo_hash",
+    "smtp_password",
+    "smtp_user",
     "street",
     "zip_code",
 )

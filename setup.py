@@ -1,11 +1,39 @@
 import os
 from PyQt5.QtWidgets import ( QApplication,
     QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout,
-    QFormLayout, QMessageBox, QDialog, QDialogButtonBox, QGridLayout
+    QComboBox, QFormLayout, QMessageBox, QDialog, QDialogButtonBox, QGridLayout
 ) # Add QFont
 from PyQt5.QtCore import Qt, QTimer
 from config import secret_manager # Import the global secret_manager
 from PyQt5.QtGui import QIcon
+
+SECRET_SETUP_FIELDS = [
+    ("db_host", "DB host:"),
+    ("db_port", "DB Port:"),
+    ("db_name", "DB name:"),
+    ("db_user", "DB user:"),
+    ("db_password", "DB password:"),
+    ("credentials_json", "JSON credentials:"),
+    ("google_wallet_issuer_id", "Google Wallet Issuer ID:"),
+    ("project_id", "Google Cloud project:"),
+    ("bucket_name", "Bucket name:"),
+    ("logo_pic", "Society Logo file:"),
+    ("crypt_key", "Crypt key:"),
+    ("smtp_server", "SMTP Server:"),
+    ("smtp_port", "SMTP Port:"),
+    ("smtp_user", "SMTP User:"),
+    ("smtp_password", "SMTP Password:"),
+    ("log_level", "Log level:"),
+    ("ecp_signing_key_id", "eCP signing key ID:"),
+    ("ecp_signing_private_key_b64", "eCP signing private key (base64 PEM):"),
+]
+
+SENSITIVE_SECRET_FIELDS = {
+    "db_password",
+    "crypt_key",
+    "ecp_signing_private_key_b64",
+    "smtp_password",
+}
 
 class PinDialog(QDialog):
     def __init__(self, parent=None):
@@ -113,7 +141,7 @@ class SecretSetupGUI(QWidget):
         self.setWindowTitle(self.tr("Secrets Setup"))
         self.secrets = {}
         self.entries = {} # Window enlargement
-        self.setFixedSize(800, 550)
+        self.setFixedSize(900, 720)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
 
         icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Adjust path if necessary
@@ -127,30 +155,20 @@ class SecretSetupGUI(QWidget):
         grid = QGridLayout()
         layout.addLayout(grid)
 
-        fields = [
-            ("db_host", "DB host:"),
-            ("db_port", "DB Port:"),
-            ("db_name", "DB name:"),
-            ("db_user", "DB user:"),
-            ("db_password", "DB password:"),
-            ("credentials_json", "JSON credentials:"),
-            ("project_id", "Google Cloud project:"),
-            ("bucket_name", "Bucket name:"),
-            ("logo_pic", "Society Logo file:"),
-            ("crypt_key", "Crypt key:"),
-            ("ecp_signing_key_id", "eCP signing key ID:"),
-            ("ecp_signing_private_key_b64", "eCP signing private key (base64 PEM):")
-        ]
-
         row = 0
-        for key, label_text in fields:
+        for key, label_text in SECRET_SETUP_FIELDS:
             label = QLabel(label_text)
-            entry = QLineEdit()
-            entry.setFixedHeight(32) # Increase field height
-            entry.setMinimumWidth(500) # Adjust minimum field width
-            entry.setAlignment(Qt.AlignLeft)
-            if key in ("crypt_key", "ecp_signing_private_key_b64"):
-                entry.setEchoMode(QLineEdit.Password)
+            if key == "log_level":
+                entry = QComboBox()
+                entry.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+                entry.setMinimumWidth(500)
+            else:
+                entry = QLineEdit()
+                entry.setFixedHeight(32) # Increase field height
+                entry.setMinimumWidth(500) # Adjust minimum field width
+                entry.setAlignment(Qt.AlignLeft)
+                if key in SENSITIVE_SECRET_FIELDS:
+                    entry.setEchoMode(QLineEdit.Password)
             grid.addWidget(label, row, 0)
             grid.addWidget(entry, row, 1)
             self.entries[key] = entry
@@ -166,12 +184,28 @@ class SecretSetupGUI(QWidget):
         if secret_manager.secrets:
             for key, value in secret_manager.secrets.items():
                 if key in self.entries:
-                    self.entries[key].setText(value)
+                    self._set_entry_value(self.entries[key], value)
+
+    def _set_entry_value(self, entry, value):
+        if isinstance(entry, QComboBox):
+            value = str(value).upper()
+            index = entry.findText(value)
+            if index < 0:
+                entry.addItem(value)
+                index = entry.findText(value)
+            entry.setCurrentIndex(index)
+        else:
+            entry.setText(value)
+
+    def _get_entry_value(self, entry):
+        if isinstance(entry, QComboBox):
+            return entry.currentText()
+        return entry.text()
 
     def save_secrets(self):
         secrets_to_save = {}
         for key, entry in self.entries.items():
-            secrets_to_save[key] = entry.text()
+            secrets_to_save[key] = self._get_entry_value(entry)
 
         if secret_manager.pin:
             pin = secret_manager.pin
