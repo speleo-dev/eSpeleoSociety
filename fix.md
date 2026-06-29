@@ -194,6 +194,10 @@ After the signed eCP QR issuance and metadata persistence wiring:
 
 - Enabled double-click inline editing in the List of SSS Clubs table for editable data columns: club name, address fields, country, email, phone, webpage, and displayed president text.
 - Club table edits are persisted immediately through `db.update_club`; member count and action button cells remain read-only because they are derived/control cells.
+- Added sorting and filtering controls to the List of SSS Clubs header.
+- The club table now starts sorted by club name A-Z, supports Z-A through the header button, and also supports regular Qt header-click sorting for other columns.
+- The club filter searches across club name, address fields, country, email, phone, webpage, president text, and member count.
+- Inline club editing now stores `club_id` on each table item so editing remains safe after the table is sorted or filtered.
 - Enabled double-click inline editing in the members table inside a club.
 - Fixed-choice member fields use dropdown editors: `status` supports `applicant`, `active`, `inactive`, `blocked`; club role supports `member` and `president`.
 - Member text/date edits persist immediately: title prefix, full name, title suffix, birth date, address, phone, and email.

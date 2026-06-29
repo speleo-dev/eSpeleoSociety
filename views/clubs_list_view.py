@@ -1,16 +1,30 @@
 from PyQt5.QtWidgets import ( 
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QTableWidget, 
     QTableWidgetItem, QHeaderView, QPushButton, QMessageBox, QAbstractItemView,
-    QDialog
+    QDialog, QLineEdit
 )
 from PyQt5.QtGui import QShowEvent # Added import for QShowEvent
 from PyQt5.QtCore import Qt, pyqtSignal
+from club_filtering import club_matches_filter
 import db
 from dialogs.club_management_dialog import ClubManagementDialog
 from utils import get_table_header_stylesheet, show_error_message # Pridaný import
 
 
 CLUB_EDITABLE_COLUMNS = set(range(0, 9))
+ORIGINAL_VALUE_ROLE = Qt.UserRole
+CLUB_ID_ROLE = Qt.UserRole + 1
+SORT_VALUE_ROLE = Qt.UserRole + 2
+
+
+class SortableClubItem(QTableWidgetItem):
+    def __lt__(self, other):
+        left = self.data(SORT_VALUE_ROLE)
+        right = other.data(SORT_VALUE_ROLE)
+        if isinstance(left, int) and isinstance(right, int):
+            return left < right
+        return str(left or "").casefold() < str(right or "").casefold()
+
 
 class ClubsListView(QWidget):
     navigateToMembers = pyqtSignal(int) # Signal to emit club_id - presunuté na úroveň triedy
@@ -19,7 +33,9 @@ class ClubsListView(QWidget):
         super().__init__(parent)
         # Atribút navigateToMembers je teraz dedený z triedy
         self.clubs = []
+        self._clubs_by_id = {}
         self._loading = False
+        self._default_sort_applied = False
         self.init_ui()
 
     def init_ui(self):
@@ -28,7 +44,23 @@ class ClubsListView(QWidget):
         header = QLabel(self.tr("List of SSS Clubs"))
         header.setStyleSheet("font-size: 20px; font-weight: bold;")
         header_layout.addWidget(header)
-        header_layout.addStretch()  # posunie tlačidlo doprava
+        header_layout.addStretch()
+        header_layout.addWidget(QLabel(self.tr("Filter:")))
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText(self.tr("Filter clubs..."))
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.textChanged.connect(self.apply_filter)
+        header_layout.addWidget(self.filter_edit)
+        self.filter_status_label = QLabel("")
+        header_layout.addWidget(self.filter_status_label)
+        btn_sort_az = QPushButton(self.tr("A-Z"))
+        btn_sort_az.setToolTip(self.tr("Sort clubs by name A-Z"))
+        btn_sort_az.clicked.connect(lambda: self.sort_by_club_name(Qt.AscendingOrder))
+        header_layout.addWidget(btn_sort_az)
+        btn_sort_za = QPushButton(self.tr("Z-A"))
+        btn_sort_za.setToolTip(self.tr("Sort clubs by name Z-A"))
+        btn_sort_za.clicked.connect(lambda: self.sort_by_club_name(Qt.DescendingOrder))
+        header_layout.addWidget(btn_sort_za)
         btn_new_club = QPushButton(self.tr("➕ Create New Club"))
         btn_new_club.clicked.connect(self.request_new_club_creation)
         header_layout.addWidget(btn_new_club)
@@ -44,12 +76,21 @@ class ClubsListView(QWidget):
         layout.addWidget(self.table)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.table.itemChanged.connect(self._handle_item_changed)
+        self.table.setSortingEnabled(True)
 
         self.load_data()
 
     def load_data(self):
         self._loading = True
+        sort_section = self.table.horizontalHeader().sortIndicatorSection()
+        sort_order = self.table.horizontalHeader().sortIndicatorOrder()
+        if not self._default_sort_applied:
+            sort_section = 0
+            sort_order = Qt.AscendingOrder
+            self._default_sort_applied = True
+        self.table.setSortingEnabled(False)
         self.clubs = db.db_manager.fetch_clubs()
+        self._clubs_by_id = {club.club_id: club for club in self.clubs}
         self.table.setRowCount(len(self.clubs))
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.setWordWrap(False)
@@ -89,30 +130,40 @@ class ClubsListView(QWidget):
         
         # Nastavenie tmavého štýlu pre hlavičku tabuľky
         self.table.horizontalHeader().setStyleSheet(get_table_header_stylesheet())
+        self.table.horizontalHeader().setSortIndicatorShown(True)
         self.table.setAlternatingRowColors(True)
 
         for row, club in enumerate(self.clubs):
-            self._set_text_item(row, 0, club.name)
-            self._set_text_item(row, 1, club.street)
-            self._set_text_item(row, 2, club.city)
-            self._set_text_item(row, 3, club.zip_code)
-            self._set_text_item(row, 4, club.country)
-            self._set_text_item(row, 5, club.email)
-            self._set_text_item(row, 6, club.phone)
-            self._set_text_item(row, 7, club.webpage)
-            self._set_text_item(row, 8, club.president_name)
-            self._set_text_item(row, 9, str(club.member_count), editable=False)
+            self._set_text_item(row, 0, club.name, club_id=club.club_id)
+            self._set_text_item(row, 1, club.street, club_id=club.club_id)
+            self._set_text_item(row, 2, club.city, club_id=club.club_id)
+            self._set_text_item(row, 3, club.zip_code, club_id=club.club_id)
+            self._set_text_item(row, 4, club.country, club_id=club.club_id)
+            self._set_text_item(row, 5, club.email, club_id=club.club_id)
+            self._set_text_item(row, 6, club.phone, club_id=club.club_id)
+            self._set_text_item(row, 7, club.webpage, club_id=club.club_id)
+            self._set_text_item(row, 8, club.president_name, club_id=club.club_id)
+            self._set_text_item(row, 9, str(club.member_count), editable=False, club_id=club.club_id, sort_value=int(club.member_count or 0))
+            self._set_text_item(row, 10, "", editable=False, club_id=club.club_id)
             btn_view = QPushButton(self.tr("View"))
             # Uistite sa, že lambda správne viaže aktuálnu hodnotu club['id']
             btn_view.clicked.connect(lambda checked, cid=club.club_id: self.show_members_list(cid))
             self.table.setCellWidget(row, 10, btn_view)
+        self.table.setSortingEnabled(True)
+        if sort_section < 0 or sort_section >= self.table.columnCount():
+            sort_section = 0
+            sort_order = Qt.AscendingOrder
+        self.table.sortItems(sort_section, sort_order)
         self._loading = False
+        self.apply_filter()
 
-    def _set_text_item(self, row: int, column: int, value, editable: bool = True):
+    def _set_text_item(self, row: int, column: int, value, editable: bool = True, club_id=None, sort_value=None):
         text = "" if value is None else str(value)
-        item = QTableWidgetItem(text)
+        item = SortableClubItem(text)
         item.setToolTip(text)
-        item.setData(Qt.UserRole, text)
+        item.setData(ORIGINAL_VALUE_ROLE, text)
+        item.setData(CLUB_ID_ROLE, club_id)
+        item.setData(SORT_VALUE_ROLE, text if sort_value is None else sort_value)
         flags = item.flags()
         if editable and column in CLUB_EDITABLE_COLUMNS:
             item.setFlags(flags | Qt.ItemIsEditable)
@@ -123,11 +174,12 @@ class ClubsListView(QWidget):
     def _handle_item_changed(self, item: QTableWidgetItem):
         if self._loading or item.column() not in CLUB_EDITABLE_COLUMNS:
             return
-        if item.row() >= len(self.clubs):
+        club_id = item.data(CLUB_ID_ROLE)
+        club = self._clubs_by_id.get(club_id)
+        if club is None:
             return
 
-        club = self.clubs[item.row()]
-        old_value = item.data(Qt.UserRole) or ""
+        old_value = item.data(ORIGINAL_VALUE_ROLE) or ""
         new_value = item.text().strip()
         if new_value == old_value:
             return
@@ -135,8 +187,10 @@ class ClubsListView(QWidget):
         try:
             self._apply_club_edit(club, item.column(), new_value)
             db.db_manager.update_club(club)
-            item.setData(Qt.UserRole, new_value)
+            item.setData(ORIGINAL_VALUE_ROLE, new_value)
+            item.setData(SORT_VALUE_ROLE, new_value)
             item.setToolTip(new_value)
+            self.apply_filter()
         except Exception as exc:
             self._loading = True
             item.setText(old_value)
@@ -165,6 +219,27 @@ class ClubsListView(QWidget):
         elif column == 8:
             club.president_name = value
             club.president_name_text = value
+
+    def sort_by_club_name(self, order):
+        self.table.sortItems(0, order)
+
+    def _club_for_row(self, row: int):
+        item = self.table.item(row, 0)
+        if item is None:
+            return None
+        return self._clubs_by_id.get(item.data(CLUB_ID_ROLE))
+
+    def apply_filter(self):
+        filter_text = self.filter_edit.text() if hasattr(self, "filter_edit") else ""
+        visible_count = 0
+        for row in range(self.table.rowCount()):
+            club = self._club_for_row(row)
+            visible = club is not None and club_matches_filter(club, filter_text)
+            self.table.setRowHidden(row, not visible)
+            if visible:
+                visible_count += 1
+        if hasattr(self, "filter_status_label"):
+            self.filter_status_label.setText(f"{visible_count}/{len(self.clubs)}")
             
     def show_members_list(self, club_id: int):
         self.navigateToMembers.emit(club_id)
