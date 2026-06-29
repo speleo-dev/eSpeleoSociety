@@ -17,6 +17,7 @@ class EmptyRepository:
 class ClubRepository:
     def __init__(self):
         self.list_calls = []
+        self.member_list_calls = []
         self.profile_calls = []
         self.created_ecp_requests = []
         self.reject_duplicate_ecp_request = False
@@ -133,6 +134,23 @@ class ClubRepository:
 
     def fetch_members(self, club_id: int):
         return self.members_by_club.get(club_id, [])
+
+    def list_club_members(self, club_id: int, limit: int, cursor=None, filter_text: str = ""):
+        self.member_list_calls.append({
+            "club_id": club_id,
+            "limit": limit,
+            "cursor": cursor,
+            "filter_text": filter_text,
+        })
+        items = self.members_by_club.get(club_id, [])
+        if filter_text:
+            items = [
+                member for member in items
+                if filter_text.casefold() in f"{member.first_name} {member.last_name} {member.email}".casefold()
+            ]
+        page = items[:limit]
+        next_cursor = "next-member-cursor" if len(items) > limit else None
+        return page, next_cursor
 
     def fetch_member_portal_profile(self, member_id: int):
         self.profile_calls.append(member_id)
