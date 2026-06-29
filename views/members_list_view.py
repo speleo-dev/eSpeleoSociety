@@ -3,17 +3,22 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QAbstractItemView,
     QHeaderView, QPushButton, QHBoxLayout, QMessageBox, QDialog, QGridLayout
 )
-from PyQt5.QtGui import QPixmap, QPainter, QFont, QColor
+from PyQt5.QtGui import QIcon, QPixmap, QPainter, QFont, QColor
 from PyQt5.QtCore import Qt
 from typing import List
 import db
 from dialogs.club_management_dialog import ClubManagementDialog
 from model import Member, Club
 from dialogs.member_management_dialog import MemberManagementDialog 
-from utils import get_state_pixmap, _get_scaled_pixmap_from_cache, load_image_from_url, get_table_header_stylesheet, show_warning_message, show_info_message, show_success_message # Added import
+from inline_editing import parse_address_text, parse_full_name, parse_optional_date
+from utils import get_state_pixmap, _get_scaled_pixmap_from_cache, load_image_from_url, get_table_header_stylesheet, show_warning_message, show_info_message, show_success_message, show_error_message # Added import
+from views.editing_delegates import ComboBoxDelegate
 
 MAX_MEMBERS_LIST_LOGO_WIDTH = 400
 MAX_MEMBERS_LIST_LOGO_HEIGHT = 100
+MEMBER_STATUSES = ["applicant", "active", "inactive", "blocked"]
+MEMBER_ROLES = ["member", "president"]
+MEMBER_EDITABLE_COLUMNS = set(range(0, 9))
 
 class MembersListView(QWidget):
     def __init__(self, parent_window=None, parent=None):
@@ -21,6 +26,7 @@ class MembersListView(QWidget):
         self.parent_window = parent_window
         self.current_club: Club = None
         self.members: List[Member] = []
+        self._loading = False
         #self.table = QTableWidget() # We define the table as a class attribute
         self.init_ui()
 
@@ -125,7 +131,10 @@ class MembersListView(QWidget):
         header.setStyleSheet(get_table_header_stylesheet())
         self.table.setStyleSheet("QTableWidget { font-size: 8pt; }")
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers) # Disable editing
+        self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        self.table.setItemDelegateForColumn(0, ComboBoxDelegate(MEMBER_STATUSES, self.table))
+        self.table.setItemDelegateForColumn(1, ComboBoxDelegate(MEMBER_ROLES, self.table))
+        self.table.itemChanged.connect(self._handle_item_changed)
         self.table.setAlternatingRowColors(True)
 
         layout.addWidget(self.table)
@@ -151,11 +160,13 @@ class MembersListView(QWidget):
             show_warning_message(self.tr("Missing reference to the main window."))
 
     def load_data_for_club(self, club: Club):
+        self._loading = True
         self.current_club = club
         if not club:
             self.club_details_label.setText(self.tr("No club selected."))
             self.table.setRowCount(0)
             self.btn_manage_club.setEnabled(False)
+            self._loading = False
             return
 
         header_text = (
@@ -195,20 +206,17 @@ class MembersListView(QWidget):
         for row, member_obj in enumerate(self.members):
             try:
                 pixmap = get_state_pixmap(member_obj, self.current_club)
-                state_label = QLabel()
-                state_label.setPixmap(pixmap)
-                state_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-                self.table.setCellWidget(row, 0, state_label)
+                self._set_text_item(row, 0, member_obj.status or "", icon=QIcon(pixmap))
             except Exception as e:
                 print(f"Error loading state pixmap for member {member_obj.first_name}: {e}") # Use translated attribute
-                self.table.setItem(row, 0, QTableWidgetItem(member_obj.status)) # Use translated attribute
+                self._set_text_item(row, 0, member_obj.status or "") # Use translated attribute
 
-            role_text = self.tr("President") if member_obj.is_president else self.tr("Member")
-            self.table.setItem(row, 1, QTableWidgetItem(role_text))
-            self.table.setItem(row, 2, QTableWidgetItem(member_obj.title_prefix or ""))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{member_obj.first_name} {member_obj.last_name}"))
-            self.table.setItem(row, 4, QTableWidgetItem(member_obj.title_suffix or ""))
-            self.table.setItem(row, 5, QTableWidgetItem(str(member_obj.birth_date) if member_obj.birth_date else "")) # Uses property
+            role_text = "president" if member_obj.is_president else "member"
+            self._set_text_item(row, 1, role_text)
+            self._set_text_item(row, 2, member_obj.title_prefix or "")
+            self._set_text_item(row, 3, f"{member_obj.first_name} {member_obj.last_name}")
+            self._set_text_item(row, 4, member_obj.title_suffix or "")
+            self._set_text_item(row, 5, str(member_obj.birth_date) if member_obj.birth_date else "") # Uses property
             address_parts = [
                 member_obj.street,
                 member_obj.city,
@@ -216,15 +224,93 @@ class MembersListView(QWidget):
                 member_obj.country
             ]
             full_address = ", ".join(part for part in address_parts if part and part.strip())
-            self.table.setItem(row, 6, QTableWidgetItem(full_address))
-            self.table.setItem(row, 7, QTableWidgetItem(member_obj.phone or ""))
-            self.table.setItem(row, 8, QTableWidgetItem(member_obj.email or ""))
+            self._set_text_item(row, 6, full_address)
+            self._set_text_item(row, 7, member_obj.phone or "")
+            self._set_text_item(row, 8, member_obj.email or "")
             
             btn_manage = QPushButton(self.tr("Manage"))
             btn_manage.clicked.connect(lambda checked, m=member_obj: self.open_member_management_dialog(m))
             self.table.setCellWidget(row, 9, btn_manage)
+        self._loading = False
         
         #self.table.resizeColumnsToContents()
+
+    def _set_text_item(self, row: int, column: int, value, icon: QIcon = None):
+        text = "" if value is None else str(value)
+        item = QTableWidgetItem(icon, text) if icon else QTableWidgetItem(text)
+        item.setToolTip(text)
+        item.setData(Qt.UserRole, text)
+        flags = item.flags()
+        if column in MEMBER_EDITABLE_COLUMNS:
+            item.setFlags(flags | Qt.ItemIsEditable)
+        else:
+            item.setFlags(flags & ~Qt.ItemIsEditable)
+        self.table.setItem(row, column, item)
+
+    def _handle_item_changed(self, item: QTableWidgetItem):
+        if self._loading or item.column() not in MEMBER_EDITABLE_COLUMNS:
+            return
+        if item.row() >= len(self.members) or not self.current_club:
+            return
+
+        member = self.members[item.row()]
+        old_value = item.data(Qt.UserRole) or ""
+        new_value = item.text().strip()
+        if new_value == old_value:
+            return
+
+        try:
+            reload_after_save = self._apply_member_edit(member, item.column(), new_value)
+            item.setData(Qt.UserRole, new_value)
+            item.setToolTip(new_value)
+            if item.column() == 0:
+                item.setIcon(QIcon(get_state_pixmap(member, self.current_club)))
+            if reload_after_save:
+                updated_club = db.db_manager.fetch_club_by_id(self.current_club.club_id)
+                self.load_data_for_club(updated_club or self.current_club)
+        except Exception as exc:
+            self._loading = True
+            item.setText(old_value)
+            self._loading = False
+            show_error_message(self.tr("Failed to save member value: ") + str(exc))
+
+    def _apply_member_edit(self, member: Member, column: int, value: str) -> bool:
+        if column == 0:
+            if value not in MEMBER_STATUSES:
+                raise ValueError(self.tr("Unsupported member status."))
+            member.status = value
+            db.db_manager.update_member(member)
+        elif column == 1:
+            if value not in MEMBER_ROLES:
+                raise ValueError(self.tr("Unsupported member role."))
+            db.db_manager.set_club_member_role(self.current_club.club_id, member.member_id, value)
+            return True
+        elif column == 2:
+            member.title_prefix = value
+            db.db_manager.update_member(member)
+        elif column == 3:
+            member.first_name, member.last_name = parse_full_name(value)
+            db.db_manager.update_member(member)
+        elif column == 4:
+            member.title_suffix = value
+            db.db_manager.update_member(member)
+        elif column == 5:
+            member.birth_date = parse_optional_date(value)
+            db.db_manager.update_member_birth_date(member.member_id, member.birth_date)
+        elif column == 6:
+            address = parse_address_text(value)
+            member.street = address.street
+            member.city = address.city
+            member.zip_code = address.zip_code
+            member.country = address.country
+            db.db_manager.update_member(member)
+        elif column == 7:
+            member.phone = value
+            db.db_manager.update_member(member)
+        elif column == 8:
+            member.email = value
+            db.db_manager.update_member(member)
+        return False
 
     def open_member_management_dialog(self, member: Member = None, is_new: bool = False):
         if not self.current_club:

@@ -315,6 +315,42 @@ class DbQueryContractsTest(unittest.TestCase):
         self.assertEqual(member_id, 22)
         self.assertEqual(manager.execute_queries, [])
 
+    def test_update_member_birth_date_encrypts_or_clears_value(self):
+        manager = RecordingDatabaseManager()
+
+        manager.update_member_birth_date(member_id=22, birth_date=date(1980, 1, 2))
+
+        self.assertIn("birth_date_encrypted", manager.last_execute_query)
+        self.assertIn("encode(encrypt", manager.last_execute_query)
+        self.assertEqual(manager.last_execute_params[0], b"1980-01-02")
+        self.assertEqual(manager.last_execute_params[1], b"1980-01-02")
+        self.assertEqual(manager.last_execute_params[-1], 22)
+
+    def test_set_club_member_role_president_updates_single_president_link(self):
+        manager = RecordingDatabaseManager()
+
+        manager.set_club_member_role(club_id=11, member_id=22, role="president")
+
+        joined_queries = "\n".join(manager.execute_queries)
+        self.assertIn("UPDATE club_affiliations", joined_queries)
+        self.assertIn("SET role = 'member'", joined_queries)
+        self.assertIn("SET role = %s", joined_queries)
+        self.assertIn("UPDATE clubs", joined_queries)
+        self.assertIn((11,), manager.execute_params)
+        self.assertIn(("president", 11, 22), manager.execute_params)
+        self.assertIn((22, 11), manager.execute_params)
+
+    def test_set_club_member_role_member_clears_matching_president_link(self):
+        manager = RecordingDatabaseManager()
+
+        manager.set_club_member_role(club_id=11, member_id=22, role="member")
+
+        joined_queries = "\n".join(manager.execute_queries)
+        self.assertIn("SET role = %s", joined_queries)
+        self.assertIn("president_id = NULL", joined_queries)
+        self.assertIn(("member", 11, 22), manager.execute_params)
+        self.assertIn((11, 22), manager.execute_params)
+
 
 if __name__ == "__main__":
     unittest.main()

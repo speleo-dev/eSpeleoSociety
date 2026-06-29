@@ -189,3 +189,15 @@ After the signed eCP QR issuance and metadata persistence wiring:
 - Added focused tests for the parser, club DB contracts, schema columns, and the additive migration.
 - Applied the additive migration and imported/updated 53 public SSS club directory rows in the configured PostgreSQL database. Post-import verification showed 57 clubs total, 53 rows with public president text, 53 rows with phone, 57 rows with email, and 31 rows with webpage.
 - Re-applied the import after adding president-member support. Post-import verification showed 53 clubs with `president_id`, 53 `club_affiliations.role = 'president'` rows, and 53 directory stub members. `Speleoklub Nitra` was verified with `doc. Mgr. Tomáš Lánczos, PhD.` as primary club member with role `president`.
+
+## Inline Table Editing
+
+- Enabled double-click inline editing in the List of SSS Clubs table for editable data columns: club name, address fields, country, email, phone, webpage, and displayed president text.
+- Club table edits are persisted immediately through `db.update_club`; member count and action button cells remain read-only because they are derived/control cells.
+- Enabled double-click inline editing in the members table inside a club.
+- Fixed-choice member fields use dropdown editors: `status` supports `applicant`, `active`, `inactive`, `blocked`; club role supports `member` and `president`.
+- Member text/date edits persist immediately: title prefix, full name, title suffix, birth date, address, phone, and email.
+- Birth date inline edits accept empty value or ISO `YYYY-MM-DD`; invalid date text is rejected and reverted.
+- Changing a member role to `president` clears any previous president role in that club, sets the member as primary in that club, and updates `clubs.president_id`.
+- Changing a president role back to `member` clears `clubs.president_id` only if it pointed to that member.
+- Added pure parser tests for inline full-name, address, and date editing plus DB contract tests for birth-date updates and role changes.

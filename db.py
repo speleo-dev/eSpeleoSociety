@@ -130,7 +130,7 @@ class DatabaseManager:
         SELECT c.club_id, c.club_name, c.street, c.city, c.zip_code, c.country, c.email, c.phone, c.webpage,
                c.president_id, c.president_name_text, c.foundation_date, c.logo_url,
                COUNT(ca.member_id) AS member_count,
-               COALESCE(NULLIF(m.first_name || ' ' || m.last_name, ''), NULLIF(c.president_name_text, ''), '') as president_name
+               COALESCE(NULLIF(c.president_name_text, ''), NULLIF(m.first_name || ' ' || m.last_name, ''), '') as president_name
         FROM clubs c
         LEFT JOIN club_affiliations ca ON c.club_id = ca.club_id
         LEFT JOIN members m ON c.president_id = m.member_id
@@ -164,7 +164,7 @@ class DatabaseManager:
         SELECT c.club_id, c.club_name, c.street, c.city, c.zip_code, c.country, 
                c.email, c.phone, c.webpage, c.president_id, c.president_name_text, c.foundation_date, c.logo_url,
                (SELECT COUNT(ca.member_id) FROM club_affiliations ca WHERE ca.club_id = c.club_id) AS member_count,
-               COALESCE(NULLIF(m.first_name || ' ' || m.last_name, ''), NULLIF(c.president_name_text, ''), '') as president_name
+               COALESCE(NULLIF(c.president_name_text, ''), NULLIF(m.first_name || ' ' || m.last_name, ''), '') as president_name
         FROM clubs c
         LEFT JOIN members m ON c.president_id = m.member_id
         WHERE c.club_id = %s;
@@ -776,6 +776,78 @@ class DatabaseManager:
         )
         self._execute(query, params)
         self._log_action("UPDATE", "members", f"Updated member ID {member.member_id}")
+
+    def update_member_birth_date(self, member_id: int, birth_date):
+        query = """
+        UPDATE members
+        SET birth_date_encrypted = CASE
+            WHEN %s IS NULL THEN NULL
+            ELSE encode(encrypt(%s, %s, 'aes'::text), 'hex')
+        END
+        WHERE member_id = %s;
+        """
+        birth_date_payload = None
+        if birth_date:
+            if isinstance(birth_date, (datetime.date, datetime.datetime)):
+                birth_date_payload = birth_date.isoformat().encode("utf-8")
+            else:
+                birth_date_payload = str(birth_date).encode("utf-8")
+        encryption_key_bytes = secret_manager.get_secret("crypt_key").encode("utf-8")
+        self._execute(
+            query,
+            (birth_date_payload, birth_date_payload, encryption_key_bytes, member_id),
+        )
+        self._log_action("UPDATE", "members", f"Updated birth date for member ID {member_id}")
+
+    def set_club_member_role(self, club_id: int, member_id: int, role: str):
+        if role not in {"member", "president"}:
+            raise ValueError("Unsupported club member role.")
+
+        if role == "president":
+            self._execute(
+                """
+                UPDATE club_affiliations
+                SET role = 'member'
+                WHERE club_id = %s
+                  AND role = 'president';
+                """,
+                (club_id,),
+            )
+            self._execute(
+                """
+                UPDATE club_affiliations
+                SET role = %s,
+                    is_primary_club = TRUE
+                WHERE club_id = %s
+                  AND member_id = %s;
+                """,
+                (role, club_id, member_id),
+            )
+            self.set_primary_memberships(member_id=member_id, club_id=club_id)
+            self._execute(
+                "UPDATE clubs SET president_id = %s WHERE club_id = %s;",
+                (member_id, club_id),
+            )
+        else:
+            self._execute(
+                """
+                UPDATE club_affiliations
+                SET role = %s
+                WHERE club_id = %s
+                  AND member_id = %s;
+                """,
+                (role, club_id, member_id),
+            )
+            self._execute(
+                """
+                UPDATE clubs
+                SET president_id = NULL
+                WHERE club_id = %s
+                  AND president_id = %s;
+                """,
+                (club_id, member_id),
+            )
+        self._log_action("UPDATE", "club_affiliations", f"Set role {role} for member ID {member_id} in club ID {club_id}")
 
     def insert_member(self, member: Member):
         query = """

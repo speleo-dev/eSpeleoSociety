@@ -4,10 +4,13 @@ from PyQt5.QtWidgets import (
     QDialog
 )
 from PyQt5.QtGui import QShowEvent # Added import for QShowEvent
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal
 import db
 from dialogs.club_management_dialog import ClubManagementDialog
-from utils import get_table_header_stylesheet # Pridaný import
+from utils import get_table_header_stylesheet, show_error_message # Pridaný import
+
+
+CLUB_EDITABLE_COLUMNS = set(range(0, 9))
 
 class ClubsListView(QWidget):
     navigateToMembers = pyqtSignal(int) # Signal to emit club_id - presunuté na úroveň triedy
@@ -15,6 +18,8 @@ class ClubsListView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         # Atribút navigateToMembers je teraz dedený z triedy
+        self.clubs = []
+        self._loading = False
         self.init_ui()
 
     def init_ui(self):
@@ -37,13 +42,15 @@ class ClubsListView(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(11)
         layout.addWidget(self.table)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers) # Zakázanie editácie
+        self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        self.table.itemChanged.connect(self._handle_item_changed)
 
         self.load_data()
 
     def load_data(self):
-        clubs = db.db_manager.fetch_clubs()
-        self.table.setRowCount(len(clubs))
+        self._loading = True
+        self.clubs = db.db_manager.fetch_clubs()
+        self.table.setRowCount(len(self.clubs))
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.setWordWrap(False)
         self.table.setStyleSheet("QTableWidget { font-size: 10pt; }")
@@ -84,7 +91,7 @@ class ClubsListView(QWidget):
         self.table.horizontalHeader().setStyleSheet(get_table_header_stylesheet())
         self.table.setAlternatingRowColors(True)
 
-        for row, club in enumerate(clubs):
+        for row, club in enumerate(self.clubs):
             self._set_text_item(row, 0, club.name)
             self._set_text_item(row, 1, club.street)
             self._set_text_item(row, 2, club.city)
@@ -94,17 +101,70 @@ class ClubsListView(QWidget):
             self._set_text_item(row, 6, club.phone)
             self._set_text_item(row, 7, club.webpage)
             self._set_text_item(row, 8, club.president_name)
-            self._set_text_item(row, 9, str(club.member_count))
+            self._set_text_item(row, 9, str(club.member_count), editable=False)
             btn_view = QPushButton(self.tr("View"))
             # Uistite sa, že lambda správne viaže aktuálnu hodnotu club['id']
             btn_view.clicked.connect(lambda checked, cid=club.club_id: self.show_members_list(cid))
             self.table.setCellWidget(row, 10, btn_view)
+        self._loading = False
 
-    def _set_text_item(self, row: int, column: int, value):
+    def _set_text_item(self, row: int, column: int, value, editable: bool = True):
         text = "" if value is None else str(value)
         item = QTableWidgetItem(text)
         item.setToolTip(text)
+        item.setData(Qt.UserRole, text)
+        flags = item.flags()
+        if editable and column in CLUB_EDITABLE_COLUMNS:
+            item.setFlags(flags | Qt.ItemIsEditable)
+        else:
+            item.setFlags(flags & ~Qt.ItemIsEditable)
         self.table.setItem(row, column, item)
+
+    def _handle_item_changed(self, item: QTableWidgetItem):
+        if self._loading or item.column() not in CLUB_EDITABLE_COLUMNS:
+            return
+        if item.row() >= len(self.clubs):
+            return
+
+        club = self.clubs[item.row()]
+        old_value = item.data(Qt.UserRole) or ""
+        new_value = item.text().strip()
+        if new_value == old_value:
+            return
+
+        try:
+            self._apply_club_edit(club, item.column(), new_value)
+            db.db_manager.update_club(club)
+            item.setData(Qt.UserRole, new_value)
+            item.setToolTip(new_value)
+        except Exception as exc:
+            self._loading = True
+            item.setText(old_value)
+            self._loading = False
+            show_error_message(self.tr("Failed to save club value: ") + str(exc))
+
+    def _apply_club_edit(self, club, column: int, value: str):
+        if column == 0:
+            if not value:
+                raise ValueError(self.tr("Club name cannot be empty."))
+            club.name = value
+        elif column == 1:
+            club.street = value
+        elif column == 2:
+            club.city = value
+        elif column == 3:
+            club.zip_code = value
+        elif column == 4:
+            club.country = value
+        elif column == 5:
+            club.email = value
+        elif column == 6:
+            club.phone = value
+        elif column == 7:
+            club.webpage = value
+        elif column == 8:
+            club.president_name = value
+            club.president_name_text = value
             
     def show_members_list(self, club_id: int):
         self.navigateToMembers.emit(club_id)
