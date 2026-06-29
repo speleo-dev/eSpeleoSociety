@@ -26,7 +26,11 @@ class Member:
                  ecp_hash: Optional[str] = None,
                  member_id: Optional[int] = None,
                  has_paid_current_year_fee: Optional[bool] = None,
-                 is_directory_stub: bool = False): # Pridaný nový parameter
+                 is_directory_stub: bool = False,
+                 portrait_url: Optional[str] = None,
+                 portrait_hash: Optional[str] = None,
+                 portrait_face_detected: bool = False,
+                 portrait_updated_at = None): # Pridaný nový parameter
         self.member_id = member_id
         self.status = status
         self.title_prefix = title_prefix
@@ -52,6 +56,10 @@ class Member:
         self.is_president = is_president
         self.has_paid_current_year_fee = has_paid_current_year_fee # Uloženie prednačítanej informácie
         self.is_directory_stub = is_directory_stub
+        self.portrait_url = portrait_url
+        self.portrait_hash = portrait_hash
+        self.portrait_face_detected = portrait_face_detected
+        self.portrait_updated_at = portrait_updated_at
 
     def __repr__(self):
         return f"<Member id={self.member_id} name='{self.first_name} {self.last_name}'>"

@@ -7,3 +7,4 @@ psycopg2-binary
 pycryptodome
 qrcode
 requests
+opencv-python-headless

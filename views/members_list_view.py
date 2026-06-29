@@ -7,7 +7,10 @@ from PyQt5.QtGui import QIcon, QPixmap, QPainter, QFont, QColor
 from PyQt5.QtCore import Qt
 from typing import List
 import db
+from config import secret_manager
 from dialogs.club_management_dialog import ClubManagementDialog
+from ecp_documents import DEFAULT_LEGAL_DOCUMENT_URL
+from email_notifications import EmailNotificationError, send_ecp_issued_email
 from model import Member, Club
 from dialogs.member_management_dialog import MemberManagementDialog 
 from inline_editing import parse_address_text, parse_full_name, parse_optional_date
@@ -145,6 +148,9 @@ class MembersListView(QWidget):
         btn_mass_fee_update = QPushButton(self.tr("Mass Fee Update"))
         btn_mass_fee_update.clicked.connect(self.mass_fee_update_members)
         button_layout.addWidget(btn_mass_fee_update)
+        btn_mass_send_ecp = QPushButton(self.tr("Mass Send eCP Cards"))
+        btn_mass_send_ecp.clicked.connect(self.mass_send_ecp_cards)
+        button_layout.addWidget(btn_mass_send_ecp)
         button_layout.addStretch()
         btn_add_member = QPushButton(self.tr("➕ Add Member"))
         btn_add_member.clicked.connect(self.add_new_member)
@@ -367,3 +373,61 @@ class MembersListView(QWidget):
                 member.set_paid_fee() # The set_paid_fee method already handles the current year and DB write
             show_success_message(self.tr("Fees have been set for the selected members."))
             self.load_data_for_club(self.current_club) # Refresh the list
+
+    def mass_send_ecp_cards(self):
+        selected_indexes = self.table.selectionModel().selectedRows()
+        if not selected_indexes:
+            show_info_message(self.tr("You have not selected any members."))
+            return
+
+        count = len(selected_indexes)
+        member_names = [f"{self.members[index.row()].first_name} {self.members[index.row()].last_name}" for index in selected_indexes]
+        member_names_str = ", ".join(member_names)
+        reply = QMessageBox.question(
+            self,
+            self.tr("Confirmation"),
+            self.tr(f"You have selected {count} members ({member_names_str}).\nSend eCP card email to members with an issued eCP?"),
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        sent_count = 0
+        skipped = []
+        failed = []
+        for index in selected_indexes:
+            member: Member = self.members[index.row()]
+            display_name = f"{member.first_name} {member.last_name}".strip()
+            if not member.email:
+                skipped.append(f"{display_name}: missing email")
+                continue
+            if not member.ecp_hash:
+                skipped.append(f"{display_name}: missing eCP")
+                continue
+            ecp_record = db.db_manager.fetch_ecp(member.ecp_hash)
+            if not ecp_record:
+                skipped.append(f"{display_name}: eCP record not found")
+                continue
+            try:
+                send_ecp_issued_email(
+                    member,
+                    ecp_record,
+                    secret_manager.get_secret,
+                    verification_url=getattr(ecp_record, "verification_url", None),
+                    card_image_url=getattr(ecp_record, "card_image_url", None),
+                    card_pdf_url=getattr(ecp_record, "card_pdf_url", None),
+                    legal_document_url=getattr(ecp_record, "legal_document_url", None) or DEFAULT_LEGAL_DOCUMENT_URL,
+                )
+                sent_count += 1
+            except EmailNotificationError as exc:
+                failed.append(f"{display_name}: {exc}")
+
+        parts = [self.tr(f"Sent eCP card emails: {sent_count}.")]
+        if skipped:
+            parts.append(self.tr("Skipped: ") + "; ".join(skipped))
+        if failed:
+            parts.append(self.tr("Failed: ") + "; ".join(failed))
+        if failed:
+            show_warning_message("\n".join(parts))
+        else:
+            show_success_message("\n".join(parts))

@@ -201,3 +201,46 @@ After the signed eCP QR issuance and metadata persistence wiring:
 - Changing a member role to `president` clears any previous president role in that club, sets the member as primary in that club, and updates `clubs.president_id`.
 - Changing a president role back to `member` clears `clubs.president_id` only if it pointed to that member.
 - Added pure parser tests for inline full-name, address, and date editing plus DB contract tests for birth-date updates and role changes.
+
+## eCP Delivery, QR Detail Page, Email Attachments, And Portraits
+
+- Added `ecp_documents.py` with the public legal document URL for the current general exception PDF: `https://sss.sk/wp-content/uploads/2026/06/vynimka.pdf`.
+- Extended the signed QR claim so it can include `verification_url` and `legal_documents`.
+- The QR remains GDPR-minimal: tests assert it does not include birth date, email, phone, street, or contact/address fields.
+- Added `ecp_card.py` to generate the member card from the same signed QR payload as:
+  - JPG card asset under `ecp_cards/{ecp_hash}.jpg`,
+  - PDF card asset under `ecp_cards/{ecp_hash}.pdf`,
+  - tokenized static verification HTML under `ecp_verify/{random_token}.html`.
+- The verification HTML contains member name, member ID, club, status, issue date, validity, signing key ID, payload hash, portrait image URL when available, QR/JPG/PDF links, and legal document links.
+- The static page includes `noindex`, `nofollow`, `noarchive`, and `no-referrer` metadata.
+- Security caveat: because this is still a static GCS page, protection is based on an unguessable random URL token and non-indexing metadata. It is not equivalent to authenticated access control. True revocation, access logging, rate limiting, and role-based detailed data access still belong in the future API/OAuth2 backend.
+- Added `issue_and_upload_ecp_delivery_bundle()` in `ecp_issuance.py`. It:
+  - builds a random verification page URL first,
+  - signs the QR claim with that URL included,
+  - uploads the QR PNG,
+  - generates and uploads JPG/PDF card assets,
+  - uploads the static verification page,
+  - returns all bytes and URLs for DB persistence and email sending.
+- Direct eCP issuance now uses the delivery bundle and emails the generated JPG/PDF card as attachments.
+- eCP request approval now uses the same delivery bundle and emails the generated JPG/PDF card as attachments.
+- The email body now includes the online verification URL, card URLs when available, and the legal PDF URL.
+- Added mass eCP card sending from the members list. It does not issue new cards; it sends email for selected members that already have an eCP record, using stored verification/card URLs.
+- Added reusable member portrait support:
+  - `members.portrait_url`,
+  - `members.portrait_hash`,
+  - `members.portrait_face_detected`,
+  - `members.portrait_updated_at`.
+- Member add/edit dialog now supports portrait photo upload without showing photos in member tables.
+- Added `face_detection.py` to normalize portrait uploads to JPEG, reject tiny images, and run OpenCV Haar face detection when `opencv-python-headless` is installed.
+- If OpenCV is unavailable or no face is detected, the user gets a warning and can decide whether to continue with the portrait.
+- eCP issuance preloads a saved member portrait when available, while still allowing a fresh eCP photo to be loaded in the issuance dialog.
+- Added additive migration `database/migrations/2026-06-29-ecp-delivery-and-portraits.sql`.
+- Updated `database/schema.sql` with delivery and portrait columns.
+- Applied the migration to the configured PostgreSQL database and verified all 8 new columns exist.
+- Removed the four explicit test clubs from the configured database: `Test1`, `Test2`, `Test 3`, and `Test4`.
+- Verified that the configured database now returns 0 club names matching `test`, `skus`, or `skúš`.
+- Verified the legal PDF URL with HTTP HEAD: it returns `HTTP 200`, content type `application/pdf`, and last modified timestamp `2026-06-01 18:46:31 UTC`.
+- Added/updated tests for QR GDPR-minimal claims, delivery bundle upload flow, card JPG/PDF generation, email attachments, schema migration, DB query contracts, portrait preparation, and flow wiring.
+- Full local verification after this change:
+  - `rtk .venv/bin/python -m unittest discover -s tests -v`: 63 tests passed, 1 PostgreSQL integration test skipped because `ESPELEO_TEST_DATABASE_URL` is not set.
+  - `rtk .venv/bin/python -m compileall -q .`: passed.

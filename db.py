@@ -18,6 +18,11 @@ SENSITIVE_LOG_KEYS = (
     "email",
     "phone",
     "photo_hash",
+    "portrait_hash",
+    "portrait_url",
+    "verification_url",
+    "card_image_url",
+    "card_pdf_url",
     "smtp_password",
     "smtp_user",
     "street",
@@ -196,7 +201,9 @@ class DatabaseManager:
         SELECT m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
                m.birth_date_encrypted, m.street, m.city, m.zip_code, m.country,
                m.phone, m.email, m.ecp_hash,
-               m.discounted_membership, ca.club_id as primary_club_id
+               m.discounted_membership, m.portrait_url, m.portrait_hash,
+               m.portrait_face_detected, m.portrait_updated_at,
+               ca.club_id as primary_club_id
         FROM members m
         JOIN club_affiliations ca ON ca.member_id = m.member_id
         WHERE m.member_id = %s AND ca.is_primary_club = TRUE
@@ -220,7 +227,11 @@ class DatabaseManager:
                 ecp_hash=row['ecp_hash'],
                 discounted_membership=row['discounted_membership'],
                 primary_club_id=row['primary_club_id'],
-                member_id=row['member_id']
+                member_id=row['member_id'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
             )
         return None
     
@@ -229,7 +240,9 @@ class DatabaseManager:
         SELECT m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
                m.birth_date_encrypted, m.street, m.city, m.zip_code, m.country,
                m.phone, m.email, m.ecp_hash,
-               m.discounted_membership, ca.club_id as primary_club_id
+               m.discounted_membership, m.portrait_url, m.portrait_hash,
+               m.portrait_face_detected, m.portrait_updated_at,
+               ca.club_id as primary_club_id
         FROM members m
         JOIN club_affiliations ca ON ca.member_id = m.member_id
         WHERE m.ecp_hash = %s AND ca.is_primary_club = TRUE
@@ -253,7 +266,11 @@ class DatabaseManager:
                 ecp_hash=row['ecp_hash'],
                 discounted_membership=row['discounted_membership'],
                 primary_club_id=row['primary_club_id'],
-                member_id=row['member_id']
+                member_id=row['member_id'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
             )
         return None
 
@@ -264,6 +281,7 @@ class DatabaseManager:
             m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
             m.birth_date_encrypted, m.street, m.city, m.zip_code, m.country,
             m.phone, m.email, m.ecp_hash, m.discounted_membership, m.is_directory_stub,
+            m.portrait_url, m.portrait_hash, m.portrait_face_detected, m.portrait_updated_at,
             ca_assoc.role AS club_role,
             (SELECT sub_ca.club_id FROM club_affiliations sub_ca
              WHERE sub_ca.member_id = m.member_id AND sub_ca.is_primary_club = TRUE LIMIT 1) as primary_club_id,
@@ -299,6 +317,10 @@ class DatabaseManager:
                 has_paid_current_year_fee=row['has_paid_current_year_fee'],
                 is_president=row['club_role'] == 'president',
                 is_directory_stub=row['is_directory_stub'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
            ))
         return members
 
@@ -311,6 +333,7 @@ class DatabaseManager:
             m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
             m.birth_date_encrypted, m.street, m.city, m.zip_code, m.country,
             m.phone, m.email, m.ecp_hash, m.discounted_membership, m.is_directory_stub,
+            m.portrait_url, m.portrait_hash, m.portrait_face_detected, m.portrait_updated_at,
             (SELECT sub_ca.club_id FROM club_affiliations sub_ca
              WHERE sub_ca.member_id = m.member_id AND sub_ca.is_primary_club = TRUE LIMIT 1) as primary_club_id,
             EXISTS (
@@ -351,6 +374,10 @@ class DatabaseManager:
                 primary_club_id=row['primary_club_id'],
                 member_id=row['member_id'], has_paid_current_year_fee=row['has_paid_current_year_fee'],
                 is_directory_stub=row['is_directory_stub'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
             ))
         return members
 
@@ -426,6 +453,10 @@ class DatabaseManager:
             wallet_status=self._row_get(row, 'wallet_status'),
             wallet_object_id=self._row_get(row, 'wallet_object_id'),
             wallet_last_error=self._row_get(row, 'wallet_last_error'),
+            verification_url=self._row_get(row, 'verification_url'),
+            card_image_url=self._row_get(row, 'card_image_url'),
+            card_pdf_url=self._row_get(row, 'card_pdf_url'),
+            legal_document_url=self._row_get(row, 'legal_document_url'),
         )
 
     def fetch_ecp(self, hash_ecp: str) -> Ecp:
@@ -433,7 +464,8 @@ class DatabaseManager:
         SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
                er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
                er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
-               er.wallet_object_id, er.wallet_last_error, m.member_id
+               er.wallet_object_id, er.wallet_last_error, er.verification_url,
+               er.card_image_url, er.card_pdf_url, er.legal_document_url, m.member_id
         FROM ecp_records er
         JOIN members m ON m.ecp_hash = er.ecp_hash
         WHERE er.ecp_hash = %s;
@@ -448,7 +480,8 @@ class DatabaseManager:
         SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
                er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
                er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
-               er.wallet_object_id, er.wallet_last_error
+               er.wallet_object_id, er.wallet_last_error, er.verification_url,
+               er.card_image_url, er.card_pdf_url, er.legal_document_url
         FROM ecp_records er
         WHERE er.photo_hash = %s;
         """
@@ -462,7 +495,8 @@ class DatabaseManager:
         SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
                er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
                er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
-               er.wallet_object_id, er.wallet_last_error
+               er.wallet_object_id, er.wallet_last_error, er.verification_url,
+               er.card_image_url, er.card_pdf_url, er.legal_document_url
         FROM ecp_records er
         WHERE er.ecp_record_id = %s;
         """
@@ -799,6 +833,24 @@ class DatabaseManager:
         )
         self._log_action("UPDATE", "members", f"Updated birth date for member ID {member_id}")
 
+    def update_member_portrait(
+        self,
+        member_id: int,
+        portrait_url: str,
+        portrait_hash: str,
+        face_detected: bool,
+    ):
+        query = """
+        UPDATE members
+        SET portrait_url = %s,
+            portrait_hash = %s,
+            portrait_face_detected = %s,
+            portrait_updated_at = CURRENT_TIMESTAMP
+        WHERE member_id = %s;
+        """
+        self._execute(query, (portrait_url, portrait_hash, face_detected, member_id))
+        self._log_action("UPDATE", "members", f"Updated portrait metadata for member ID {member_id}")
+
     def set_club_member_role(self, club_id: int, member_id: int, role: str):
         if role not in {"member", "president"}:
             raise ValueError("Unsupported club member role.")
@@ -1003,6 +1055,10 @@ class DatabaseManager:
         issued_at,
         valid_until,
         wallet_status: str = "not_issued",
+        verification_url: str | None = None,
+        card_image_url: str | None = None,
+        card_pdf_url: str | None = None,
+        legal_document_url: str | None = None,
     ):
         query = """
         UPDATE ecp_records
@@ -1015,6 +1071,10 @@ class DatabaseManager:
             issued_at = %s,
             valid_until = %s,
             wallet_status = %s,
+            verification_url = %s,
+            card_image_url = %s,
+            card_pdf_url = %s,
+            legal_document_url = %s,
             wallet_last_error = NULL
         WHERE ecp_record_id = %s;
         """
@@ -1027,6 +1087,10 @@ class DatabaseManager:
             issued_at,
             valid_until,
             wallet_status,
+            verification_url,
+            card_image_url,
+            card_pdf_url,
+            legal_document_url,
             ecp_record_id,
         )
         self._execute(query, params)

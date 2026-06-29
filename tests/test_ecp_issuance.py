@@ -6,6 +6,7 @@ from ecp_qr import generate_ecp_signing_key_pair, verify_ecp_payload
 from ecp_issuance import (
     EcpSigningConfigError,
     calculate_ecp_valid_until,
+    issue_and_upload_ecp_delivery_bundle,
     issue_signed_ecp_qr,
     issue_and_upload_signed_ecp_qr,
     load_ecp_signing_config,
@@ -109,6 +110,52 @@ class EcpIssuanceTest(unittest.TestCase):
         self.assertTrue(verify_ecp_payload(issued.payload, public_key_pem, now=date(2026, 6, 22)))
         self.assertEqual(issued.key_id, "key-2026")
         self.assertEqual(len(issued.payload_hash), 64)
+
+    def test_issue_and_upload_ecp_delivery_bundle_uploads_qr_page_and_card_assets(self):
+        private_key_pem, public_key_pem = generate_ecp_signing_key_pair()
+        member = SimpleNamespace(
+            member_id=123,
+            title_prefix="",
+            first_name="Ada",
+            last_name="Lovelace",
+            title_suffix="",
+            status="active",
+            portrait_url="https://storage.example/portraits/123.jpg",
+        )
+        club = SimpleNamespace(club_id=9, name="Speleo Club")
+        uploads = []
+
+        def upload(blob_name, data, content_type):
+            uploads.append((blob_name, data, content_type))
+            return f"https://storage.example/{blob_name}"
+
+        bundle = issue_and_upload_ecp_delivery_bundle(
+            member=member,
+            club=club,
+            ecp_hash="abc123",
+            get_secret={
+                "ecp_signing_private_key_pem": private_key_pem.decode("utf-8"),
+                "ecp_signing_key_id": "key-2026",
+                "bucket_name": "ecp-test-bucket",
+            }.get,
+            upload_blob=upload,
+            valid_until=date(2027, 6, 22),
+            issued_at=datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(verify_ecp_payload(bundle.issued_qr.payload, public_key_pem, now=date(2026, 6, 22)))
+        self.assertEqual(bundle.issued_qr.payload["claim"]["verification_url"], bundle.verification_url)
+        self.assertIn("vynimka.pdf", bundle.issued_qr.payload["claim"]["legal_documents"][0]["url"])
+        self.assertTrue(bundle.card_image.startswith(b"\xff\xd8"))
+        self.assertTrue(bundle.card_pdf.startswith(b"%PDF"))
+        self.assertEqual(bundle.qr_url, "https://storage.example/ecp_qr/abc123.png")
+        self.assertTrue(bundle.verification_url.startswith("https://storage.googleapis.com/ecp-test-bucket/ecp_verify/"))
+        uploaded_names = [name for name, _, _ in uploads]
+        self.assertEqual(uploaded_names[0], "ecp_qr/abc123.png")
+        self.assertIn("ecp_cards/abc123.jpg", uploaded_names)
+        self.assertIn("ecp_cards/abc123.pdf", uploaded_names)
+        self.assertTrue(any(name.startswith("ecp_verify/") and name.endswith(".html") for name in uploaded_names))
+        self.assertTrue(any(content_type == "text/html; charset=utf-8" for _, _, content_type in uploads))
 
 
 if __name__ == "__main__":

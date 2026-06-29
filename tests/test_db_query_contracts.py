@@ -103,6 +103,10 @@ class DbQueryContractsTest(unittest.TestCase):
             "issued_at": datetime(2026, 6, 23, 12, 0),
             "valid_until": date(2027, 6, 23),
             "wallet_status": "not_issued",
+            "verification_url": "https://storage.example/ecp_verify/token.html",
+            "card_image_url": "https://storage.example/ecp_cards/a.jpg",
+            "card_pdf_url": "https://storage.example/ecp_cards/a.pdf",
+            "legal_document_url": "https://sss.sk/wp-content/uploads/2026/06/vynimka.pdf",
         })
 
         ecp_record = manager.fetch_ecp_record_by_id(33)
@@ -114,6 +118,9 @@ class DbQueryContractsTest(unittest.TestCase):
         self.assertEqual(ecp_record.qr_payload_hash, "c" * 64)
         self.assertEqual(ecp_record.valid_until, date(2027, 6, 23))
         self.assertEqual(ecp_record.wallet_status, "not_issued")
+        self.assertEqual(ecp_record.verification_url, "https://storage.example/ecp_verify/token.html")
+        self.assertEqual(ecp_record.card_image_url, "https://storage.example/ecp_cards/a.jpg")
+        self.assertEqual(ecp_record.card_pdf_url, "https://storage.example/ecp_cards/a.pdf")
         self.assertIn("WHERE er.ecp_record_id = %s", manager.last_fetch_one_query)
         self.assertNotIn("er.member_id", manager.last_fetch_one_query)
 
@@ -141,6 +148,10 @@ class DbQueryContractsTest(unittest.TestCase):
             qr_payload_hash="c" * 64,
             issued_at=issued_at,
             valid_until=valid_until,
+            verification_url="https://storage.example/ecp_verify/token.html",
+            card_image_url="https://storage.example/ecp_cards/b.jpg",
+            card_pdf_url="https://storage.example/ecp_cards/b.pdf",
+            legal_document_url="https://sss.sk/wp-content/uploads/2026/06/vynimka.pdf",
         )
 
         for column_name in (
@@ -151,6 +162,10 @@ class DbQueryContractsTest(unittest.TestCase):
             "issued_at",
             "valid_until",
             "wallet_status",
+            "verification_url",
+            "card_image_url",
+            "card_pdf_url",
+            "legal_document_url",
         ):
             self.assertIn(column_name, manager.last_execute_query)
         self.assertIn("WHERE ecp_record_id = %s", manager.last_execute_query)
@@ -161,7 +176,30 @@ class DbQueryContractsTest(unittest.TestCase):
         self.assertEqual(manager.last_execute_params[5], issued_at)
         self.assertEqual(manager.last_execute_params[6], valid_until)
         self.assertEqual(manager.last_execute_params[7], "not_issued")
+        self.assertEqual(manager.last_execute_params[8], "https://storage.example/ecp_verify/token.html")
+        self.assertEqual(manager.last_execute_params[9], "https://storage.example/ecp_cards/b.jpg")
+        self.assertEqual(manager.last_execute_params[10], "https://storage.example/ecp_cards/b.pdf")
+        self.assertEqual(manager.last_execute_params[11], "https://sss.sk/wp-content/uploads/2026/06/vynimka.pdf")
         self.assertEqual(manager.last_execute_params[-1], 33)
+
+    def test_update_member_portrait_persists_portrait_metadata(self):
+        manager = RecordingDatabaseManager()
+
+        manager.update_member_portrait(
+            member_id=22,
+            portrait_url="https://storage.example/member_portraits/22.jpg",
+            portrait_hash="d" * 64,
+            face_detected=True,
+        )
+
+        self.assertIn("portrait_url = %s", manager.last_execute_query)
+        self.assertIn("portrait_hash = %s", manager.last_execute_query)
+        self.assertIn("portrait_face_detected = %s", manager.last_execute_query)
+        self.assertIn("portrait_updated_at = CURRENT_TIMESTAMP", manager.last_execute_query)
+        self.assertEqual(
+            manager.last_execute_params,
+            ("https://storage.example/member_portraits/22.jpg", "d" * 64, True, 22),
+        )
 
     def test_delete_ecp_record_by_id_targets_author_schema_primary_key(self):
         manager = RecordingDatabaseManager()

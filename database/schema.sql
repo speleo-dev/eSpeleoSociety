@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS public.members (
     zip_code character varying(20),
     country character varying(100),
     member_since date,
+    portrait_url text,
+    portrait_hash character varying(64),
+    portrait_face_detected boolean DEFAULT false NOT NULL,
+    portrait_updated_at timestamp,
     CONSTRAINT members_pkey PRIMARY KEY (member_id),
     CONSTRAINT members_member_status_check
         CHECK ((member_status)::text = ANY ((ARRAY[
@@ -81,6 +85,9 @@ ALTER SEQUENCE public.members_member_id_seq OWNED BY public.members.member_id;
 
 CREATE UNIQUE INDEX members_ecp_hash_key
     ON public.members USING btree (ecp_hash);
+
+CREATE INDEX idx_members_portrait_hash
+    ON public.members USING btree (portrait_hash);
 
 CREATE TABLE IF NOT EXISTS public.clubs (
     club_id integer DEFAULT nextval('public.clubs_club_id_seq'::regclass) NOT NULL,
@@ -156,6 +163,10 @@ CREATE TABLE IF NOT EXISTS public.ecp_records (
     wallet_status character varying(30) DEFAULT 'not_issued',
     wallet_object_id text,
     wallet_last_error text,
+    verification_url text,
+    card_image_url text,
+    card_pdf_url text,
+    legal_document_url text,
     CONSTRAINT ecp_records_pkey PRIMARY KEY (ecp_record_id)
 );
 

@@ -4,6 +4,8 @@ from email.message import EmailMessage
 import smtplib
 import ssl
 
+from ecp_documents import DEFAULT_LEGAL_DOCUMENT_URL
+
 
 class EmailNotificationError(RuntimeError):
     pass
@@ -74,7 +76,17 @@ def _format_valid_until(value) -> str | None:
     return str(value)
 
 
-def build_ecp_issued_message(config: SmtpConfig, member, issued_qr=None) -> EmailMessage:
+def build_ecp_issued_message(
+    config: SmtpConfig,
+    member,
+    issued_qr=None,
+    verification_url: str | None = None,
+    card_image: bytes | None = None,
+    card_pdf: bytes | None = None,
+    card_image_url: str | None = None,
+    card_pdf_url: str | None = None,
+    legal_document_url: str = DEFAULT_LEGAL_DOCUMENT_URL,
+) -> EmailMessage:
     recipient = getattr(member, "email", None)
     if not recipient:
         raise SmtpConfigError("Member email is missing.")
@@ -89,6 +101,16 @@ def build_ecp_issued_message(config: SmtpConfig, member, issued_qr=None) -> Emai
     ]
     if valid_until:
         lines.extend(["", f"Platnost preukazu: do {valid_until}."])
+    if verification_url:
+        lines.extend(["", "Online overenie preukazu:", verification_url])
+    if card_image_url or card_pdf_url:
+        lines.extend(["", "Preukaz je dostupny aj online:"])
+        if card_image_url:
+            lines.append(f"JPG: {card_image_url}")
+        if card_pdf_url:
+            lines.append(f"PDF: {card_pdf_url}")
+    if legal_document_url:
+        lines.extend(["", "Vseobecna vynimka a pravny dokument:", legal_document_url])
     lines.extend([
         "",
         "V pripade otazok kontaktujte spravcu alebo svoj klub.",
@@ -101,6 +123,20 @@ def build_ecp_issued_message(config: SmtpConfig, member, issued_qr=None) -> Emai
     message["To"] = recipient
     message["Subject"] = "Vystaveny elektronicky clensky preukaz eCP"
     message.set_content("\n".join(lines))
+    if card_image:
+        message.add_attachment(
+            card_image,
+            maintype="image",
+            subtype="jpeg",
+            filename="ecp-preukaz.jpg",
+        )
+    if card_pdf:
+        message.add_attachment(
+            card_pdf,
+            maintype="application",
+            subtype="pdf",
+            filename="ecp-preukaz.pdf",
+        )
     return message
 
 
@@ -123,7 +159,28 @@ def send_email(config: SmtpConfig, message: EmailMessage, smtp_factory=None):
         raise SmtpSendError(f"SMTP send failed: {exc}") from exc
 
 
-def send_ecp_issued_email(member, issued_qr, get_secret, smtp_factory=None):
+def send_ecp_issued_email(
+    member,
+    issued_qr,
+    get_secret,
+    smtp_factory=None,
+    verification_url: str | None = None,
+    card_image: bytes | None = None,
+    card_pdf: bytes | None = None,
+    card_image_url: str | None = None,
+    card_pdf_url: str | None = None,
+    legal_document_url: str = DEFAULT_LEGAL_DOCUMENT_URL,
+):
     config = load_smtp_config(get_secret)
-    message = build_ecp_issued_message(config, member, issued_qr=issued_qr)
+    message = build_ecp_issued_message(
+        config,
+        member,
+        issued_qr=issued_qr,
+        verification_url=verification_url,
+        card_image=card_image,
+        card_pdf=card_pdf,
+        card_image_url=card_image_url,
+        card_pdf_url=card_pdf_url,
+        legal_document_url=legal_document_url,
+    )
     send_email(config, message, smtp_factory=smtp_factory)
