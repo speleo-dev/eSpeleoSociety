@@ -19,11 +19,26 @@ class ClubManagementDialog(QDialog):
         self.resize(500, 300)
         self.setWindowIcon(get_icon("logo.ico"))
         self.is_new = is_new
-        self.club = club # club_id, name, address, email, phone, president_id, president_name, foundation_date, member_count, logo_url
+        self.club = club
         self.setMinimumWidth(600) # Allow dialog to be wider for larger logo
         if self.is_new:
-            # club_id, name, street, city, zip_code, email, phone, president_id, foundation_date, logo_url
-            self.club = Club(None, "", "", "", "", "", "", None, "", None, 0, None)
+            self.club = Club(
+                club_id=None,
+                name="",
+                street="",
+                city="",
+                zip_code="",
+                country="",
+                email="",
+                phone="",
+                president_id=None,
+                president_name="",
+                foundation_date=None,
+                member_count=0,
+                logo_url=None,
+                webpage="",
+                president_name_text="",
+            )
         self.original_club_data = copy.copy(self.club) # Renamed for consistency
         self.edit_mode = is_new
         self.selected_logo_path = None
@@ -63,8 +78,10 @@ class ClubManagementDialog(QDialog):
             self.de_foundation_date.setDate(qdate)
         else:
             self.de_foundation_date.setDate(QDate.currentDate())
-        self.le_phone = QLineEdit(self.club.phone)
-        self.le_email = QLineEdit(self.club.email)
+        self.le_phone = QLineEdit(self.club.phone or "")
+        self.le_email = QLineEdit(self.club.email or "")
+        self.le_webpage = QLineEdit(self.club.webpage or "")
+        self.le_public_president_name = QLineEdit(self.club.president_name_text or "")
 
         self.cb_president = QComboBox()
         self.cb_president.addItem("", None)
@@ -88,6 +105,8 @@ class ClubManagementDialog(QDialog):
         form_layout.addRow(self.tr("Foundation Date:"), self.de_foundation_date)
         form_layout.addRow(self.tr("Phone:"), self.le_phone)
         form_layout.addRow(self.tr("Email:"), self.le_email)
+        form_layout.addRow(self.tr("Webpage:"), self.le_webpage)
+        form_layout.addRow(self.tr("Public President Name:"), self.le_public_president_name)
         form_layout.addRow(self.tr("Club President:"), self.cb_president)
 
         # Logo Section
@@ -204,6 +223,10 @@ class ClubManagementDialog(QDialog):
         self.le_phone.setStyleSheet("background-color: #E8E8E8;")
         self.le_email.setReadOnly(True)
         self.le_email.setStyleSheet("background-color: #E8E8E8;")
+        self.le_webpage.setReadOnly(True)
+        self.le_webpage.setStyleSheet("background-color: #E8E8E8;")
+        self.le_public_president_name.setReadOnly(True)
+        self.le_public_president_name.setStyleSheet("background-color: #E8E8E8;")
         self.cb_president.setEnabled(False)
         self.btn_upload_logo.setEnabled(False)
         self.btn_edit.setVisible(True)
@@ -228,6 +251,10 @@ class ClubManagementDialog(QDialog):
         self.le_phone.setStyleSheet("")
         self.le_email.setReadOnly(False)
         self.le_email.setStyleSheet("background-color: #E8D888;")
+        self.le_webpage.setReadOnly(False)
+        self.le_webpage.setStyleSheet("")
+        self.le_public_president_name.setReadOnly(False)
+        self.le_public_president_name.setStyleSheet("")
         self.cb_president.setEnabled(True)
         self.btn_upload_logo.setEnabled(True)
         self.edit_mode = True
@@ -270,6 +297,8 @@ class ClubManagementDialog(QDialog):
         self.club.foundation_date = date_val
         self.club.phone = self.le_phone.text()
         self.club.email = self.le_email.text()
+        self.club.webpage = self.le_webpage.text()
+        self.club.president_name_text = self.le_public_president_name.text()
         self.club.president_id = self.cb_president.currentData() # This can be None if the empty item is selected
 
         if self.club.president_id is not None:
@@ -386,8 +415,10 @@ class ClubManagementDialog(QDialog):
         self.cb_country.setCurrentIndex(idx if idx >=0 else 0)
         date_val = self.original_club_data.foundation_date
         self.de_foundation_date.setDate(QDate.fromString(str(date_val), "yyyy-MM-dd") if date_val else None)
-        self.le_phone.setText(self.original_club_data.phone)
-        self.le_email.setText(self.original_club_data.email)
+        self.le_phone.setText(self.original_club_data.phone or "")
+        self.le_email.setText(self.original_club_data.email or "")
+        self.le_webpage.setText(self.original_club_data.webpage or "")
+        self.le_public_president_name.setText(self.original_club_data.president_name_text or "")
         if self.original_club_data.president_id:
             index = self.cb_president.findData(self.original_club_data.president_id)
             if index >= 0:

@@ -89,6 +89,50 @@ class DatabaseSchemaSqlTest(unittest.TestCase):
         self.assertIn("idx_club_affiliations_one_primary", migration)
         self.assertIn("idx_membership_fees_member_year_type", migration)
 
+    def test_schema_sql_contains_club_directory_contact_columns(self):
+        schema = SCHEMA_PATH.read_text(encoding="utf-8")
+        members_definition = schema.split(
+            "CREATE TABLE IF NOT EXISTS public.members",
+            1,
+        )[1].split(");", 1)[0]
+        clubs_definition = schema.split(
+            "CREATE TABLE IF NOT EXISTS public.clubs",
+            1,
+        )[1].split(");", 1)[0]
+        affiliations_definition = schema.split(
+            "CREATE TABLE IF NOT EXISTS public.club_affiliations",
+            1,
+        )[1].split(");", 1)[0]
+
+        self.assertIn("birth_date_encrypted text", members_definition)
+        self.assertNotIn("birth_date_encrypted text NOT NULL", members_definition)
+        self.assertIn("is_directory_stub boolean DEFAULT false NOT NULL", members_definition)
+        self.assertIn("email text DEFAULT ''", members_definition)
+        self.assertIn("phone text DEFAULT ''", members_definition)
+        self.assertIn("phone text DEFAULT ''", clubs_definition)
+        self.assertIn("email text DEFAULT ''", clubs_definition)
+        self.assertIn("webpage text DEFAULT ''", clubs_definition)
+        self.assertIn("president_name_text text DEFAULT ''", clubs_definition)
+        self.assertIn("role character varying(30) DEFAULT 'member' NOT NULL", affiliations_definition)
+        self.assertIn("club_affiliations_role_check", affiliations_definition)
+
+    def test_club_directory_contact_migration_is_available(self):
+        migration = Path("database/migrations/2026-06-29-club-directory-contacts.sql").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("ALTER TABLE public.clubs", migration)
+        self.assertIn("ALTER COLUMN phone TYPE text", migration)
+        self.assertIn("ALTER COLUMN email TYPE text", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS webpage text DEFAULT ''", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS president_name_text text DEFAULT ''", migration)
+        self.assertIn("ALTER COLUMN phone TYPE text", migration)
+        self.assertIn("ALTER COLUMN email TYPE text", migration)
+        self.assertIn("ALTER COLUMN birth_date_encrypted DROP NOT NULL", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS is_directory_stub boolean DEFAULT false NOT NULL", migration)
+        self.assertIn("ADD COLUMN IF NOT EXISTS role character varying(30) DEFAULT 'member' NOT NULL", migration)
+        self.assertIn("club_affiliations_role_check", migration)
+
     def test_schema_sql_can_apply_to_configured_postgres(self):
         database_url = os.environ.get("ESPELEO_TEST_DATABASE_URL")
         if not database_url:

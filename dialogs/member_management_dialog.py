@@ -320,7 +320,15 @@ class MemberManagementDialog(QDialog):
         self.member.title_suffix = self.le_title_suffix.text()
         # Convert QDate to Python date object for the model
         q_date = self.de_birth_date.date()
-        self.member.birth_date = datetime.date(q_date.year(), q_date.month(), q_date.day()) if q_date.isValid() else None
+        if (
+            self.member.is_directory_stub
+            and self.original_member
+            and self.original_member.birth_date is None
+            and q_date == QDate.currentDate()
+        ):
+            self.member.birth_date = None
+        else:
+            self.member.birth_date = datetime.date(q_date.year(), q_date.month(), q_date.day()) if q_date.isValid() else None
         self.member.street = self.le_street.text()
         self.member.city = self.le_city.text()
         self.member.zip_code = self.le_zip_code.text()

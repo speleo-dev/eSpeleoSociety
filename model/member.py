@@ -25,7 +25,8 @@ class Member:
                  discounted_membership: bool = False,
                  ecp_hash: Optional[str] = None,
                  member_id: Optional[int] = None,
-                 has_paid_current_year_fee: Optional[bool] = None): # Pridaný nový parameter
+                 has_paid_current_year_fee: Optional[bool] = None,
+                 is_directory_stub: bool = False): # Pridaný nový parameter
         self.member_id = member_id
         self.status = status
         self.title_prefix = title_prefix
@@ -50,6 +51,7 @@ class Member:
         self.memberships: List[Membership] = []
         self.is_president = is_president
         self.has_paid_current_year_fee = has_paid_current_year_fee # Uloženie prednačítanej informácie
+        self.is_directory_stub = is_directory_stub
 
     def __repr__(self):
         return f"<Member id={self.member_id} name='{self.first_name} {self.last_name}'>"

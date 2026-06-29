@@ -124,7 +124,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 - The database is not yet protected behind a backend-only network boundary.
 - The member portal and club president portal do not exist yet.
 - Real database integration tests require a configured PostgreSQL database and encrypted local secrets.
-- The schema still lacks portal identity mapping, role assignments, eCP validity fields, Wallet issuance state, and a payment import ledger.
+- The schema still lacks portal identity mapping, full authorization assignments, eCP validity fields, Wallet issuance state, and a payment import ledger.
 
 ## Author Database Schema Snapshot
 
@@ -160,3 +160,32 @@ After the local PostgreSQL schema bootstrap:
 After the signed eCP QR issuance and metadata persistence wiring:
 
 - Focused tests cover payload signing, verification, tamper rejection, expiration, one-year validity calculation, secret loading, PNG QR generation, upload handoff, GUI wiring, setup fields, QR metadata schema, additive migration, and DB issuance update contracts.
+
+## Local Runtime Configuration Check
+
+- The desktop app crashed after saving setup values because the encrypted local configuration used database name `lacisss`, while the Websupport PostgreSQL server accepts the project database as `eSpeleoSoc`.
+- Verified the encrypted `secrets.properties` can be decrypted with the local test PIN and contains DB host `db.r5.websupport.sk`, port `5432`, user value present, and password value present.
+- Tested PostgreSQL connectivity against candidate database names without printing the password. `lacisss` failed with "database does not exist"; `eSpeleoSoc` connected successfully.
+- Updated only the local encrypted DB name to `eSpeleoSoc`; no password or secret value was written into documentation.
+- Relaunched `main.py`; the GUI process stayed alive after startup with the corrected local DB name.
+- Added root-level local artifacts `codex-session`, `os`, and `sys` to `.gitignore`. The `os` and `sys` files were accidental ImageMagick/PostScript screen-capture artifacts and must not be committed.
+
+## SSS Club Directory Import And Webpage Support
+
+- Added native `clubs.webpage` support so the club list can show a separate webpage column instead of mixing web links into phone or email fields.
+- Changed the development/test schema and additive migration so `clubs.phone` and `clubs.email` are `text`. This preserves multiple phone numbers and multiple email addresses as comma-separated values.
+- Added `clubs.president_name_text` for the original public chairperson name imported from the SSS directory.
+- Added support for SSS directory presidents as member records: `members.is_directory_stub` marks imported public records that do not yet have complete member identity data such as birth date.
+- Relaxed `members.birth_date_encrypted` so directory stub members can exist without inventing a fake birth date.
+- Added `club_affiliations.role` with current values `member` and `president`.
+- The SSS import now creates or reuses a president member, inserts primary club affiliation with role `president`, and sets `clubs.president_id`.
+- Existing real president members are reused and not overwritten by public directory data; only directory stub members are refreshed from the import.
+- Updated the desktop DB read/write contract to fetch, insert, update, and upsert `webpage` and `president_name_text`.
+- Updated the List of SSS Clubs table to include a `Webpage` column. Long phone, email, and webpage values are kept in the cell and exposed through tooltips instead of being truncated in the model.
+- Updated the club management dialog and club detail header to display/edit webpage and public president text.
+- Updated the member list to show an explicit `Role` column and to sort club presidents first.
+- Added `tools/import_sss_clubs.py` for repeatable import from `https://sss.sk/zoznam-oblastnych-skupin/`. The dry-run parser currently reads 53 rows from the public SSS table.
+- Import parsing keeps repeated contact values as `value1, value2`: multiple phones stay in `phone`, multiple emails stay in `email`, and HTTP/HTTPS links stay in `webpage`.
+- Added focused tests for the parser, club DB contracts, schema columns, and the additive migration.
+- Applied the additive migration and imported/updated 53 public SSS club directory rows in the configured PostgreSQL database. Post-import verification showed 57 clubs total, 53 rows with public president text, 53 rows with phone, 57 rows with email, and 31 rows with webpage.
+- Re-applied the import after adding president-member support. Post-import verification showed 53 clubs with `president_id`, 53 `club_affiliations.role = 'president'` rows, and 53 directory stub members. `Speleoklub Nitra` was verified with `doc. Mgr. Tomáš Lánczos, PhD.` as primary club member with role `president`.

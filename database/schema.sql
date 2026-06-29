@@ -53,12 +53,13 @@ CREATE TABLE IF NOT EXISTS public.members (
     member_id integer DEFAULT nextval('public.members_member_id_seq'::regclass) NOT NULL,
     first_name character varying(100) NOT NULL,
     last_name character varying(100) NOT NULL,
-    birth_date_encrypted text NOT NULL,
-    email character varying(255) DEFAULT '',
-    phone character varying(20) DEFAULT '',
+    birth_date_encrypted text,
+    email text DEFAULT '',
+    phone text DEFAULT '',
     ecp_hash character varying(64),
     member_status character varying(20) DEFAULT 'applicant',
     discounted_membership boolean DEFAULT false,
+    is_directory_stub boolean DEFAULT false NOT NULL,
     title_prefix character varying(50) DEFAULT '',
     title_suffix character varying(50) DEFAULT '',
     street character varying(255),
@@ -84,9 +85,11 @@ CREATE UNIQUE INDEX members_ecp_hash_key
 CREATE TABLE IF NOT EXISTS public.clubs (
     club_id integer DEFAULT nextval('public.clubs_club_id_seq'::regclass) NOT NULL,
     club_name character varying(255) NOT NULL,
-    phone character varying(20) DEFAULT '',
-    email character varying(255) DEFAULT '',
+    phone text DEFAULT '',
+    email text DEFAULT '',
+    webpage text DEFAULT '',
     president_id integer,
+    president_name_text text DEFAULT '',
     foundation_date date,
     logo_url text,
     street character varying(255),
@@ -105,6 +108,12 @@ CREATE TABLE IF NOT EXISTS public.club_affiliations (
     member_id integer NOT NULL,
     club_id integer NOT NULL,
     is_primary_club boolean DEFAULT false,
+    role character varying(30) DEFAULT 'member' NOT NULL,
+    CONSTRAINT club_affiliations_role_check
+        CHECK ((role)::text = ANY ((ARRAY[
+            'member'::character varying,
+            'president'::character varying
+        ])::text[])),
     CONSTRAINT club_affiliations_pkey PRIMARY KEY (member_id, club_id)
 );
 
@@ -114,6 +123,9 @@ CREATE UNIQUE INDEX idx_club_affiliations_one_primary
 
 CREATE INDEX idx_club_affiliations_club_id
     ON public.club_affiliations USING btree (club_id);
+
+CREATE INDEX idx_club_affiliations_role
+    ON public.club_affiliations USING btree (role);
 
 CREATE TABLE IF NOT EXISTS public.db_logs (
     log_id integer DEFAULT nextval('public.db_logs_log_id_seq'::regclass) NOT NULL,

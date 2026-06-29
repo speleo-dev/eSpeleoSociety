@@ -35,7 +35,7 @@ class ClubsListView(QWidget):
         #layout.addWidget(header)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(10) # Zvýšený počet stĺpcov o 1 pre Krajinu
+        self.table.setColumnCount(11)
         layout.addWidget(self.table)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers) # Zakázanie editácie
 
@@ -56,6 +56,7 @@ class ClubsListView(QWidget):
             self.tr("Country"),
             self.tr("Email"),
             self.tr("Phone"),
+            self.tr("Webpage"),
             self.tr("President"),
             self.tr("Member Count"),
             self.tr("Actions"),
@@ -67,11 +68,15 @@ class ClubsListView(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # City
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # ZIP Code
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Country
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Email
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents) # Phone
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents) # President
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents) # Member Count
-        header.setSectionResizeMode(9, QHeaderView.ResizeToContents) # Actions
+        header.setSectionResizeMode(5, QHeaderView.Interactive) # Email
+        header.setSectionResizeMode(6, QHeaderView.Interactive) # Phone
+        header.setSectionResizeMode(7, QHeaderView.Interactive) # Webpage
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents) # President
+        header.setSectionResizeMode(9, QHeaderView.ResizeToContents) # Member Count
+        header.setSectionResizeMode(10, QHeaderView.ResizeToContents) # Actions
+        self.table.setColumnWidth(5, 230)
+        self.table.setColumnWidth(6, 170)
+        self.table.setColumnWidth(7, 230)
         header.setStretchLastSection(False) # Posledný stĺpec vyplní zvyšok
 
         
@@ -80,19 +85,26 @@ class ClubsListView(QWidget):
         self.table.setAlternatingRowColors(True)
 
         for row, club in enumerate(clubs):
-            self.table.setItem(row, 0, QTableWidgetItem(club.name))
-            self.table.setItem(row, 1, QTableWidgetItem(club.street))
-            self.table.setItem(row, 2, QTableWidgetItem(club.city))
-            self.table.setItem(row, 3, QTableWidgetItem(club.zip_code))
-            self.table.setItem(row, 4, QTableWidgetItem(club.country))
-            self.table.setItem(row, 5, QTableWidgetItem(club.email))
-            self.table.setItem(row, 6, QTableWidgetItem(club.phone))
-            self.table.setItem(row, 7, QTableWidgetItem(club.president_name))
-            self.table.setItem(row, 8, QTableWidgetItem(str(club.member_count)))
+            self._set_text_item(row, 0, club.name)
+            self._set_text_item(row, 1, club.street)
+            self._set_text_item(row, 2, club.city)
+            self._set_text_item(row, 3, club.zip_code)
+            self._set_text_item(row, 4, club.country)
+            self._set_text_item(row, 5, club.email)
+            self._set_text_item(row, 6, club.phone)
+            self._set_text_item(row, 7, club.webpage)
+            self._set_text_item(row, 8, club.president_name)
+            self._set_text_item(row, 9, str(club.member_count))
             btn_view = QPushButton(self.tr("View"))
             # Uistite sa, že lambda správne viaže aktuálnu hodnotu club['id']
             btn_view.clicked.connect(lambda checked, cid=club.club_id: self.show_members_list(cid))
-            self.table.setCellWidget(row, 9, btn_view)
+            self.table.setCellWidget(row, 10, btn_view)
+
+    def _set_text_item(self, row: int, column: int, value):
+        text = "" if value is None else str(value)
+        item = QTableWidgetItem(text)
+        item.setToolTip(text)
+        self.table.setItem(row, column, item)
             
     def show_members_list(self, club_id: int):
         self.navigateToMembers.emit(club_id)

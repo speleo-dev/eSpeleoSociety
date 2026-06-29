@@ -100,23 +100,24 @@ class MembersListView(QWidget):
         # === End of new header ===
 
         self.table = QTableWidget()
-        self.table.setColumnCount(9) 
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
-            self.tr("Status"), self.tr("Title"), self.tr("Full Name"),
+            self.tr("Status"), self.tr("Role"), self.tr("Title"), self.tr("Full Name"),
             "", self.tr("Birth Date"), self.tr("Address"), 
             self.tr("Phone"), self.tr("Email"), self.tr("Actions")
         ])
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # Status
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Title
-        header.setSectionResizeMode(2, QHeaderView.Stretch) # Full Name
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # "" (Title Suffix)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Birth Date
-        header.setSectionResizeMode(5, QHeaderView.Stretch) # Address
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents) # Phone
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents) # Email
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents) # Actions
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Role
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Title
+        header.setSectionResizeMode(3, QHeaderView.Stretch) # Full Name
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # "" (Title Suffix)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Birth Date
+        header.setSectionResizeMode(6, QHeaderView.Stretch) # Address
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents) # Phone
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents) # Email
+        header.setSectionResizeMode(9, QHeaderView.ResizeToContents) # Actions
         header.setStretchLastSection(False)
 
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -165,6 +166,7 @@ class MembersListView(QWidget):
             f"{self.tr('Country')}: {club.country}<br>"
             f"{self.tr('Email')}: {club.email}<br>"
             f"{self.tr('Phone')}: {club.phone}<br>"
+            f"{self.tr('Webpage')}: {club.webpage}<br>"
             f"{self.tr('President')}: {club.president_name if club.president_name else 'N/A'}"
         )
         self.club_details_label.setText(header_text)
@@ -201,10 +203,12 @@ class MembersListView(QWidget):
                 print(f"Error loading state pixmap for member {member_obj.first_name}: {e}") # Use translated attribute
                 self.table.setItem(row, 0, QTableWidgetItem(member_obj.status)) # Use translated attribute
 
-            self.table.setItem(row, 1, QTableWidgetItem(member_obj.title_prefix))
-            self.table.setItem(row, 2, QTableWidgetItem(f"{member_obj.first_name} {member_obj.last_name}"))
-            self.table.setItem(row, 3, QTableWidgetItem(member_obj.title_suffix))
-            self.table.setItem(row, 4, QTableWidgetItem(str(member_obj.birth_date) if member_obj.birth_date else "")) # Uses property
+            role_text = self.tr("President") if member_obj.is_president else self.tr("Member")
+            self.table.setItem(row, 1, QTableWidgetItem(role_text))
+            self.table.setItem(row, 2, QTableWidgetItem(member_obj.title_prefix or ""))
+            self.table.setItem(row, 3, QTableWidgetItem(f"{member_obj.first_name} {member_obj.last_name}"))
+            self.table.setItem(row, 4, QTableWidgetItem(member_obj.title_suffix or ""))
+            self.table.setItem(row, 5, QTableWidgetItem(str(member_obj.birth_date) if member_obj.birth_date else "")) # Uses property
             address_parts = [
                 member_obj.street,
                 member_obj.city,
@@ -212,13 +216,13 @@ class MembersListView(QWidget):
                 member_obj.country
             ]
             full_address = ", ".join(part for part in address_parts if part and part.strip())
-            self.table.setItem(row, 5, QTableWidgetItem(full_address))
-            self.table.setItem(row, 6, QTableWidgetItem(member_obj.phone))
-            self.table.setItem(row, 7, QTableWidgetItem(member_obj.email))
+            self.table.setItem(row, 6, QTableWidgetItem(full_address))
+            self.table.setItem(row, 7, QTableWidgetItem(member_obj.phone or ""))
+            self.table.setItem(row, 8, QTableWidgetItem(member_obj.email or ""))
             
             btn_manage = QPushButton(self.tr("Manage"))
             btn_manage.clicked.connect(lambda checked, m=member_obj: self.open_member_management_dialog(m))
-            self.table.setCellWidget(row, 8, btn_manage)
+            self.table.setCellWidget(row, 9, btn_manage)
         
         #self.table.resizeColumnsToContents()
 
