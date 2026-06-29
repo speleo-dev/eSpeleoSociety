@@ -14,6 +14,7 @@ class EmptyRepository:
 
 class ClubRepository:
     def __init__(self):
+        self.list_calls = []
         self.clubs = [
             SimpleNamespace(
                 club_id=1,
@@ -81,11 +82,35 @@ class ClubRepository:
     def fetch_clubs(self):
         return self.clubs
 
+    def list_clubs(self, limit: int, cursor=None, filter_text: str = ""):
+        self.list_calls.append({
+            "limit": limit,
+            "cursor": cursor,
+            "filter_text": filter_text,
+        })
+        items = self.clubs
+        if filter_text:
+            items = [
+                club for club in items
+                if filter_text.casefold() in f"{club.name} {club.city} {club.email}".casefold()
+            ]
+        page = items[:limit]
+        next_cursor = "next-club-cursor" if len(items) > limit else None
+        return page, next_cursor
+
     def fetch_members(self, club_id: int):
         return self.members_by_club.get(club_id, [])
 
     def fetch_ecp_verification_by_token(self, token: str):
         return self.ecp_verifications.get(token)
+
+
+class AuditSink:
+    def __init__(self):
+        self.events = []
+
+    def record_api_audit_event(self, event):
+        self.events.append(event)
 
 
 def make_token(secret: str, **claims) -> str:
@@ -118,19 +143,30 @@ class BackendApiTest(unittest.TestCase):
     def test_admin_can_list_clubs_with_cursor_pagination(self):
         secret = "unit-test-secret"
         token = make_token(secret, roles=["admin"])
-        app = ApiApp(repository=ClubRepository(), jwt_secret=secret)
+        audit_sink = AuditSink()
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret, audit_sink=audit_sink)
 
         response = app.handle_request(
             "GET",
             "/api/v1/clubs",
             headers={"Authorization": f"Bearer {token}"},
-            query={"limit": "1"},
+            query={"limit": "1", "filter": "nit"},
         )
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
         self.assertEqual(payload["items"][0]["name"], "Alpha")
-        self.assertIsNotNone(payload["nextCursor"])
+        self.assertIsNone(payload["nextCursor"])
+        self.assertEqual(app.repository.list_calls, [{
+            "limit": 1,
+            "cursor": None,
+            "filter_text": "nit",
+        }])
+        self.assertEqual(len(audit_sink.events), 1)
+        self.assertEqual(audit_sink.events[0].route, "/api/v1/clubs")
+        self.assertEqual(audit_sink.events[0].status_code, 200)
+        self.assertEqual(audit_sink.events[0].subject, "admin-1")
+        self.assertEqual(audit_sink.events[0].roles, ("admin",))
 
     def test_club_president_can_list_members_only_for_assigned_club(self):
         secret = "unit-test-secret"
@@ -154,7 +190,8 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(json.loads(denied.body)["error"]["code"], "forbidden")
 
     def test_ecp_verify_token_returns_public_detail_without_contact_data(self):
-        app = ApiApp(repository=ClubRepository(), jwt_secret="unit-test-secret")
+        audit_sink = AuditSink()
+        app = ApiApp(repository=ClubRepository(), jwt_secret="unit-test-secret", audit_sink=audit_sink)
 
         response = app.handle_request("GET", "/api/v1/ecp/verify/token-123456789", headers={})
 
@@ -165,6 +202,9 @@ class BackendApiTest(unittest.TestCase):
         self.assertNotIn("email", payload)
         self.assertNotIn("phone", payload)
         self.assertNotIn("street", payload)
+        self.assertEqual(audit_sink.events[0].route, "/api/v1/ecp/verify/{token}")
+        self.assertNotIn("token-123456789", repr(audit_sink.events[0]))
+        self.assertEqual(audit_sink.events[0].subject, "anonymous")
 
 
 if __name__ == "__main__":

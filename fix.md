@@ -282,3 +282,31 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - `rtk .venv/bin/python -m unittest discover -s tests -v`: 73 tests passed, 1 PostgreSQL integration test skipped because `ESPELEO_TEST_DATABASE_URL` is not set.
   - `rtk .venv/bin/python -m compileall -q .`: passed.
   - `rtk git diff --check`: passed.
+
+## Backend API Audit And SQL Club Pagination
+
+- Changed `GET /api/v1/clubs` so the API handler calls `DatabaseApiRepository.list_clubs(limit, cursor, filter_text)` instead of loading all clubs and paginating in memory.
+- Added keyset cursor helpers for id-based pagination:
+  - `encode_id_cursor(last_id)`,
+  - `decode_id_cursor(cursor)`.
+- Implemented SQL-level club listing in `DatabaseApiRepository`:
+  - filters by club name, city, email, phone, webpage, and public president text,
+  - escapes SQL LIKE wildcards,
+  - caps filter text at 100 characters,
+  - uses `c.club_id > last_id`,
+  - fetches `limit + 1` rows to decide whether `nextCursor` should be returned.
+- Avoided importing the desktop `model` package from `backend.repository` because the current desktop model layer has a circular import through `model.member -> db -> model`.
+- Added a lightweight `ClubRecord` API record with the attributes required by the API serializer.
+- Added `backend.audit.AuditEvent` for compact API request audit records.
+- `ApiApp` now records an audit event after handled requests when the repository or supplied audit sink implements `record_api_audit_event(event)`.
+- Audit records intentionally store route templates such as `/api/v1/ecp/verify/{token}` instead of raw eCP verification URLs, so token values are not persisted to `db_logs`.
+- Implemented `DatabaseApiRepository.record_api_audit_event()` over the existing sanitized `db_logs` writer as a transitional audit path.
+- Updated `docs/api/backend-api.md` with club filter semantics, SQL pagination, and audit behavior.
+- Updated `docs/api/openapi.yaml` with the `filter` query parameter for `/clubs`.
+- Updated `docs/api-oauth2-migration-plan.md` to mark SQL club pagination and transitional API request audit as implemented.
+- Added tests for:
+  - API handler delegating club pagination/filtering to the repository,
+  - API audit event creation for authenticated club listing,
+  - public eCP verification audit without raw token persistence,
+  - DB repository SQL filter/keyset pagination contract,
+  - DB repository audit logging contract.

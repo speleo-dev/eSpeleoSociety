@@ -61,6 +61,10 @@ Query:
 
 - `limit`: default `50`, max `200`
 - `cursor`: opaque cursor from the previous response
+- `filter`: optional case-insensitive search over club name, city, email, phone, webpage, and public president text
+- `q`: alias for `filter`
+
+The current implementation performs club filtering and pagination in SQL using keyset pagination over `club_id`. It fetches `limit + 1` rows to decide whether a `nextCursor` should be returned.
 
 Response:
 
@@ -127,6 +131,23 @@ HTTP status codes are used honestly:
 - `403` authenticated but not allowed,
 - `404` resource or route not found.
 
+## Audit Logging
+
+`ApiApp` records a compact audit event after each handled request when the configured repository or explicit audit sink implements `record_api_audit_event(event)`.
+
+Stored audit fields:
+
+- request id,
+- HTTP method,
+- route template,
+- status code,
+- authenticated subject or `anonymous`,
+- sorted roles,
+- outcome,
+- error code.
+
+The audit event intentionally stores route templates such as `/api/v1/ecp/verify/{token}` instead of raw request paths, so tokenized eCP verification URLs are not written to `db_logs`.
+
 ## Running Locally
 
 The skeleton has no web framework dependency. It uses a WSGI adapter and Python's development server.
@@ -154,16 +175,16 @@ Authorization: Bearer <jwt>
 ## Known Limitations
 
 - The API still uses the existing PostgreSQL schema and DB manager.
-- `GET /api/v1/clubs` currently fetches through the existing desktop repository path before API-level pagination. A later backend pass should move filtering/pagination into SQL.
+- `GET /api/v1/clubs` has SQL-level filtering and keyset pagination; `GET /api/v1/clubs/{club_id}/members` still uses the desktop DB manager path before API-level pagination.
 - JWT validation is development-only HS256. Production should use OIDC/JWKS.
 - No write endpoints exist yet.
 - No refresh tokens, login UI, or portal session handling exists yet.
-- No API audit table or rate limiting exists yet.
+- API request audit currently writes through the existing `db_logs` table; a dedicated API audit table and rate limiting are still required.
 
 ## Next Backend Slices
 
-1. Add SQL-level pagination and search for clubs and members.
-2. Add API audit logging with request id, subject, role, route, and outcome.
+1. Add SQL-level pagination and search for club members.
+2. Add a dedicated API audit table and rate limiting.
 3. Add eCP revocation/renewal endpoints behind `admin`.
 4. Add portal-member endpoint for "my profile" and "request eCP".
 5. Replace HS256 development JWT validation with OIDC discovery and JWKS.

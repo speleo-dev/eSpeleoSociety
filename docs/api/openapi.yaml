@@ -34,6 +34,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/ClubFilter"
       responses:
         "200":
           description: Paginated club list.
@@ -130,6 +131,14 @@ components:
       schema:
         type: string
       description: Opaque cursor returned by a previous list response.
+    ClubFilter:
+      name: filter
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 100
+      description: Case-insensitive search over club name, city, email, phone, webpage, and public president text.
   responses:
     Unauthorized:
       description: Missing or invalid bearer token.

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import json
 import uuid
 
+from backend.audit import AuditEvent
 from backend.auth import AuthError, authenticate_bearer, require_any_role
 from backend.pagination import paginate_items, parse_limit
 from backend.serializers import club_to_api, ecp_verification_to_api, member_to_api
@@ -39,45 +40,104 @@ def error_response(status_code: int, code: str, message: str, request_id: str) -
 
 
 class ApiApp:
-    def __init__(self, repository, jwt_secret: str, issuer: str = "espeleo-test", audience: str = "espeleo-api"):
+    def __init__(
+        self,
+        repository,
+        jwt_secret: str,
+        issuer: str = "espeleo-test",
+        audience: str = "espeleo-api",
+        audit_sink=None,
+    ):
         self.repository = repository
         self.jwt_secret = jwt_secret
         self.issuer = issuer
         self.audience = audience
+        self.audit_sink = audit_sink or repository
 
     def handle_request(self, method: str, path: str, headers=None, query=None) -> ApiResponse:
         headers = headers or {}
         query = query or {}
         request_id = headers.get("X-Request-ID") or headers.get("x-request-id") or f"req_{uuid.uuid4().hex}"
-        if method == "GET" and path == "/api/v1/health":
-            return json_response(200, {"status": "ok", "version": API_VERSION})
-        ecp_verify_token = self._match_ecp_verify_path(method, path)
-        if ecp_verify_token is not None:
-            return self._verify_ecp_token(ecp_verify_token, request_id)
-
+        context = None
+        error_code = None
+        route = self._route_template(method, path)
         try:
-            context = authenticate_bearer(
-                headers,
-                jwt_secret=self.jwt_secret,
-                audience=self.audience,
-                issuer=self.issuer,
-            )
-            if method == "GET" and path == "/api/v1/clubs":
-                return self._list_clubs(query, context)
-            club_members_id = self._match_club_members_path(method, path)
-            if club_members_id is not None:
-                return self._list_club_members(club_members_id, query, context)
+            if method == "GET" and path == "/api/v1/health":
+                response = json_response(200, {"status": "ok", "version": API_VERSION})
+            else:
+                ecp_verify_token = self._match_ecp_verify_path(method, path)
+                if ecp_verify_token is not None:
+                    response = self._verify_ecp_token(ecp_verify_token, request_id)
+                else:
+                    context = authenticate_bearer(
+                        headers,
+                        jwt_secret=self.jwt_secret,
+                        audience=self.audience,
+                        issuer=self.issuer,
+                    )
+                    if method == "GET" and path == "/api/v1/clubs":
+                        response = self._list_clubs(query, context)
+                    else:
+                        club_members_id = self._match_club_members_path(method, path)
+                        if club_members_id is not None:
+                            response = self._list_club_members(club_members_id, query, context)
+                        else:
+                            response = error_response(404, "not_found", "Endpoint not found.", request_id)
+                            error_code = "not_found"
         except AuthError as exc:
-            return error_response(exc.status_code, exc.code, exc.message, request_id)
+            error_code = exc.code
+            response = error_response(exc.status_code, exc.code, exc.message, request_id)
+        self._record_audit_event(request_id, method, route, response, context, error_code)
+        return response
 
-        return error_response(404, "not_found", "Endpoint not found.", request_id)
+    def _record_audit_event(self, request_id: str, method: str, route: str, response: ApiResponse, context, error_code):
+        recorder = getattr(self.audit_sink, "record_api_audit_event", None)
+        if not recorder:
+            return
+        subject = context.subject if context else "anonymous"
+        roles = tuple(sorted(context.roles)) if context else ()
+        if response.status_code < 400:
+            outcome = "success"
+        elif response.status_code < 500:
+            outcome = "client_error"
+        else:
+            outcome = "server_error"
+        event = AuditEvent(
+            request_id=request_id,
+            method=method,
+            route=route,
+            status_code=response.status_code,
+            subject=subject,
+            roles=roles,
+            outcome=outcome,
+            error_code=error_code,
+        )
+        try:
+            recorder(event)
+        except Exception:
+            pass
+
+    def _route_template(self, method: str, path: str) -> str:
+        if method == "GET" and path == "/api/v1/health":
+            return "/api/v1/health"
+        if method == "GET" and path == "/api/v1/clubs":
+            return "/api/v1/clubs"
+        if self._match_club_members_path(method, path) is not None:
+            return "/api/v1/clubs/{club_id}/members"
+        if self._match_ecp_verify_path(method, path) is not None:
+            return "/api/v1/ecp/verify/{token}"
+        return "unmatched"
 
     def _list_clubs(self, query: dict, context) -> ApiResponse:
         require_any_role(context, {"admin", "club_president"})
         limit = parse_limit(query.get("limit"))
         cursor = query.get("cursor")
-        clubs = list(self.repository.fetch_clubs())
-        page, next_cursor = paginate_items(clubs, limit, cursor)
+        filter_text = query.get("filter") or query.get("q") or ""
+        page, next_cursor = self.repository.list_clubs(
+            limit=limit,
+            cursor=cursor,
+            filter_text=filter_text,
+        )
         return json_response(
             200,
             {
