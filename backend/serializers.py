@@ -30,6 +30,47 @@ def member_to_api(member) -> dict:
     }
 
 
+def member_profile_to_api(profile: dict) -> dict:
+    ecp = None
+    if profile.get("ecp_active") is not None or profile.get("ecp_valid_until") is not None:
+        ecp = {
+            "active": bool(profile.get("ecp_active")),
+            "validUntil": profile.get("ecp_valid_until"),
+            "verificationUrl": profile.get("ecp_verification_url"),
+            "cardImageUrl": profile.get("ecp_card_image_url"),
+            "cardPdfUrl": profile.get("ecp_card_pdf_url"),
+            "walletStatus": profile.get("ecp_wallet_status"),
+        }
+
+    pending_request = None
+    if profile.get("pending_ecp_request_id") is not None:
+        pending_request = {
+            "id": profile.get("pending_ecp_request_id"),
+            "status": profile.get("pending_ecp_request_status"),
+            "requestDate": profile.get("pending_ecp_request_date"),
+        }
+
+    return {
+        "id": profile.get("member_id"),
+        "status": profile.get("status", "") or "",
+        "titlePrefix": profile.get("title_prefix", "") or "",
+        "firstName": profile.get("first_name", "") or "",
+        "lastName": profile.get("last_name", "") or "",
+        "titleSuffix": profile.get("title_suffix", "") or "",
+        "displayName": profile.get("display_name", "") or "",
+        "email": profile.get("email", "") or "",
+        "phone": profile.get("phone", "") or "",
+        "portraitUrl": profile.get("portrait_url"),
+        "primaryClub": {
+            "id": profile.get("primary_club_id"),
+            "name": profile.get("primary_club_name", "") or "",
+        },
+        "hasEcp": bool(ecp),
+        "ecp": ecp,
+        "pendingEcpRequest": pending_request,
+    }
+
+
 def ecp_verification_to_api(record: dict) -> dict:
     return {
         "memberId": record.get("member_id"),

@@ -11,6 +11,8 @@ Implemented API routes:
 - `GET /api/v1/health`
 - `GET /api/v1/clubs`
 - `GET /api/v1/clubs/{club_id}/members`
+- `GET /api/v1/me`
+- `POST /api/v1/me/ecp-requests`
 - `GET /api/v1/ecp/verify/{token}`
 
 OpenAPI contract:
@@ -29,11 +31,13 @@ Development skeleton validation:
 - required subject claim: `sub`
 - roles claim: `roles`, `scope`, or `realm_access.roles`
 - club president scope: `club_ids`
+- member portal link: `member_id` or `memberId`
 
 Supported roles in this slice:
 
 - `admin`
 - `club_president`
+- `member`
 
 Final production direction:
 
@@ -98,14 +102,90 @@ Requires:
 
 The response includes operational member data needed for administration. This endpoint should not be exposed to ordinary members.
 
-Query:
+### `GET /api/v1/me`
 
-- `limit`: default `50`, max `200`
-- `cursor`: opaque composite cursor from the previous response
-- `filter`: optional case-insensitive search over display name, email, phone, member status, and club role
-- `q`: alias for `filter`
+Requires role `member` and a JWT `member_id` or `memberId` claim.
 
-The current implementation performs member filtering and pagination in SQL using a composite keyset cursor over role priority, last name, first name, and `member_id`. This keeps club presidents first while avoiding full-table fetches.
+This endpoint is the first member portal API slice. It returns the authenticated member's own profile and eCP/request status without exposing internal hashes, encrypted birth date, or address fields.
+
+Response:
+
+```json
+{
+  "id": 101,
+  "status": "active",
+  "titlePrefix": "",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "titleSuffix": "",
+  "displayName": "Ada Lovelace",
+  "email": "ada@example.sk",
+  "phone": "0901",
+  "portraitUrl": "https://storage.example/portrait.jpg",
+  "primaryClub": {
+    "id": 1,
+    "name": "Speleo Club"
+  },
+  "hasEcp": true,
+  "ecp": {
+    "active": true,
+    "validUntil": "2027-06-29",
+    "verificationUrl": "https://storage.example/ecp_verify/token.html",
+    "cardImageUrl": "https://storage.example/card.jpg",
+    "cardPdfUrl": "https://storage.example/card.pdf",
+    "walletStatus": "issued"
+  },
+  "pendingEcpRequest": {
+    "id": 55,
+    "status": "pending",
+    "requestDate": "2026-06-29"
+  }
+}
+```
+
+If the token is authenticated but has no member link, the API returns `403` with code `member_identity_required`.
+
+### `POST /api/v1/me/ecp-requests`
+
+Requires role `member` and a JWT `member_id` or `memberId` claim.
+
+Creates a pending eCP request for the authenticated member. The request body is JSON with an uploaded portrait/photo encoded as base64. The backend stores the photo through the configured storage uploader, creates an inactive `ecp_records` row, and links `ecp_requests.ecp_record_id` so the existing admin approval flow can process it.
+
+Request:
+
+```json
+{
+  "photoBase64": "<base64 image bytes>",
+  "contentType": "image/jpeg",
+  "gdprConsent": true,
+  "notificationsEnabled": true
+}
+```
+
+Rules:
+
+- `photoBase64` is required.
+- decoded photo size must be 5 MB or smaller.
+- `contentType` must be `image/jpeg` or `image/png`.
+- `gdprConsent` must be explicitly `true`.
+- `notificationsEnabled` defaults to `true`.
+- if the member already has a pending eCP request, the API returns `409 ecp_request_already_pending` and does not upload a new photo.
+
+Response `201`:
+
+```json
+{
+  "id": 77,
+  "memberId": 101,
+  "ecpRecordId": 88,
+  "photoHash": "photo-hash",
+  "photoUrl": "https://storage.example/ecp_request_photos/photo-hash.jpg",
+  "status": "pending",
+  "requestDate": "2026-06-29"
+}
+```
+
+Validation errors use `422` with stable codes such as `invalid_request_body`, `photo_required`, `invalid_photo_base64`, `photo_too_large`, `unsupported_photo_content_type`, and `gdpr_consent_required`. Duplicate pending requests use `409 ecp_request_already_pending`.
 
 ### `GET /api/v1/ecp/verify/{token}`
 
@@ -186,8 +266,9 @@ Authorization: Bearer <jwt>
 - The API still uses the existing PostgreSQL schema and DB manager.
 - `GET /api/v1/clubs` and `GET /api/v1/clubs/{club_id}/members` have SQL-level filtering and keyset pagination.
 - JWT validation is development-only HS256. Production should use OIDC/JWKS.
-- No write endpoints exist yet.
+- The first member write endpoint exists for eCP requests; admin write endpoints are still not implemented.
 - No refresh tokens, login UI, or portal session handling exists yet.
+- `POST /api/v1/me/ecp-requests` accepts JSON/base64 upload as a transitional API shape. A production portal can later switch to multipart or direct-to-storage signed upload without changing the approval data model.
 - API request audit currently writes through the existing `db_logs` table; a dedicated API audit table and rate limiting are still required.
 
 ## Next Backend Slices
@@ -195,5 +276,5 @@ Authorization: Bearer <jwt>
 1. Add a dedicated API audit table and rate limiting.
 2. Add portal-member endpoint for "my profile" and "request eCP".
 3. Add eCP revocation/renewal endpoints behind `admin`.
-4. Replace HS256 development JWT validation with OIDC discovery and JWKS.
-5. Switch desktop read paths to the API client.
+4. Add idempotency keys for `POST /api/v1/me/ecp-requests`.
+5. Replace HS256 development JWT validation with OIDC discovery and JWKS.

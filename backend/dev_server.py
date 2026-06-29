@@ -4,7 +4,9 @@ from wsgiref.simple_server import make_server
 import config
 import db
 from backend.app import ApiApp
+from backend.crypto import make_check_hash_factory
 from backend.repository import DatabaseApiRepository
+from backend.storage import make_gcs_upload_blob
 from backend.wsgi import make_wsgi_app
 
 
@@ -22,7 +24,11 @@ def create_wsgi_app_from_environment():
         db.db_manager = db.DatabaseManager()
 
     api_app = ApiApp(
-        repository=DatabaseApiRepository(db.db_manager),
+        repository=DatabaseApiRepository(
+            db.db_manager,
+            upload_blob=make_gcs_upload_blob(config.secret_manager.get_secret),
+            check_hash_factory=make_check_hash_factory(config.secret_manager.get_secret),
+        ),
         jwt_secret=jwt_secret,
         issuer=os.environ.get("ESPELEO_API_ISSUER", "espeleo-test"),
         audience=os.environ.get("ESPELEO_API_AUDIENCE", "espeleo-api"),

@@ -20,6 +20,7 @@ class AuthContext:
     subject: str
     roles: frozenset[str]
     club_ids: frozenset[int]
+    member_id: int | None = None
 
     def has_role(self, role: str) -> bool:
         return role in self.roles
@@ -55,6 +56,15 @@ def _normalise_club_ids(claims: dict) -> frozenset[int]:
     return frozenset(club_ids)
 
 
+def _normalise_member_id(claims: dict) -> int | None:
+    for key in ("member_id", "memberId"):
+        try:
+            return int(claims[key])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
 def authenticate_bearer(
     headers: dict[str, str],
     jwt_secret: str,
@@ -81,6 +91,7 @@ def authenticate_bearer(
         subject=subject,
         roles=_normalise_roles(claims),
         club_ids=_normalise_club_ids(claims),
+        member_id=_normalise_member_id(claims),
     )
 
 

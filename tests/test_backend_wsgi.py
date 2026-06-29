@@ -1,13 +1,27 @@
 import json
 import unittest
+from io import BytesIO
 
-from backend.app import ApiApp
+from backend.app import ApiApp, ApiResponse
 from backend.wsgi import make_wsgi_app
 
 
 class EmptyRepository:
     def fetch_clubs(self):
         return []
+
+
+class CaptureBodyApp:
+    def __init__(self):
+        self.captured = None
+
+    def handle_request(self, **kwargs):
+        self.captured = kwargs
+        return ApiResponse(
+            status_code=201,
+            body=json.dumps({"body": kwargs["body"]}),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
 
 
 class BackendWsgiTest(unittest.TestCase):
@@ -28,6 +42,28 @@ class BackendWsgiTest(unittest.TestCase):
         self.assertEqual(captured["status"], "200 OK")
         self.assertEqual(captured["headers"]["Content-Type"], "application/json; charset=utf-8")
         self.assertEqual(json.loads(body.decode("utf-8")), {"status": "ok", "version": "v1"})
+
+    def test_wsgi_adapter_passes_request_body_to_api_app(self):
+        api_app = CaptureBodyApp()
+        application = make_wsgi_app(api_app)
+        captured = {}
+        body_bytes = b'{"photoBase64":"cG9ydHJhaXQ="}'
+
+        def start_response(status, headers):
+            captured["status"] = status
+            captured["headers"] = dict(headers)
+
+        body = b"".join(application({
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/v1/me/ecp-requests",
+            "QUERY_STRING": "",
+            "CONTENT_LENGTH": str(len(body_bytes)),
+            "wsgi.input": BytesIO(body_bytes),
+        }, start_response))
+
+        self.assertEqual(captured["status"], "201 Created")
+        self.assertEqual(api_app.captured["body"], body_bytes.decode("utf-8"))
+        self.assertEqual(json.loads(body.decode("utf-8")), {"body": body_bytes.decode("utf-8")})
 
 
 if __name__ == "__main__":

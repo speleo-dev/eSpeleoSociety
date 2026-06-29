@@ -88,6 +88,50 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /me:
+    get:
+      summary: Get own member portal profile
+      description: Requires role `member` and token claim `member_id` or `memberId`.
+      responses:
+        "200":
+          description: Authenticated member profile and eCP/request status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /me/ecp-requests:
+    post:
+      summary: Request own eCP
+      description: Requires role `member` and token claim `member_id` or `memberId`. Uploads a photo and creates a pending eCP request linked to an inactive eCP record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EcpRequestCreate"
+      responses:
+        "201":
+          description: Pending eCP request was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EcpRequestCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /ecp/verify/{token}:
     get:
       summary: Verify an eCP by online token
@@ -149,6 +193,12 @@ components:
         maxLength: 100
       description: Case-insensitive search over display name, email, phone, member status, and club role.
   responses:
+    BadRequest:
+      description: Request body is malformed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     Unauthorized:
       description: Missing or invalid bearer token.
       content:
@@ -161,8 +211,20 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Request conflicts with current member state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     NotFound:
       description: Resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    UnprocessableEntity:
+      description: Request body is syntactically valid but failed validation.
       content:
         application/json:
           schema:
@@ -221,6 +283,115 @@ components:
           type: boolean
         hasEcp:
           type: boolean
+    MemberProfile:
+      type: object
+      required: [id, status, titlePrefix, firstName, lastName, titleSuffix, displayName, email, phone, primaryClub, hasEcp, ecp, pendingEcpRequest]
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        titlePrefix:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        titleSuffix:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        portraitUrl:
+          type: string
+          nullable: true
+        primaryClub:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: integer
+              nullable: true
+            name:
+              type: string
+        hasEcp:
+          type: boolean
+        ecp:
+          type: object
+          nullable: true
+          required: [active, validUntil, verificationUrl, cardImageUrl, cardPdfUrl, walletStatus]
+          properties:
+            active:
+              type: boolean
+            validUntil:
+              type: string
+              format: date
+              nullable: true
+            verificationUrl:
+              type: string
+              nullable: true
+            cardImageUrl:
+              type: string
+              nullable: true
+            cardPdfUrl:
+              type: string
+              nullable: true
+            walletStatus:
+              type: string
+              nullable: true
+        pendingEcpRequest:
+          type: object
+          nullable: true
+          required: [id, status, requestDate]
+          properties:
+            id:
+              type: integer
+            status:
+              type: string
+            requestDate:
+              type: string
+              format: date
+              nullable: true
+    EcpRequestCreate:
+      type: object
+      required: [photoBase64, contentType, gdprConsent]
+      properties:
+        photoBase64:
+          type: string
+          description: Base64-encoded JPEG or PNG photo bytes. Decoded size must be 5 MB or smaller.
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png]
+        gdprConsent:
+          type: boolean
+          description: Must be explicitly true.
+        notificationsEnabled:
+          type: boolean
+          default: true
+    EcpRequestCreated:
+      type: object
+      required: [id, memberId, ecpRecordId, photoHash, photoUrl, status, requestDate]
+      properties:
+        id:
+          type: integer
+        memberId:
+          type: integer
+        ecpRecordId:
+          type: integer
+        photoHash:
+          type: string
+        photoUrl:
+          type: string
+          nullable: true
+        status:
+          type: string
+          example: pending
+        requestDate:
+          type: string
+          format: date
     EcpVerification:
       type: object
       required: [memberId, displayName, clubName, status, validUntil, legalDocumentUrl, payloadHash]

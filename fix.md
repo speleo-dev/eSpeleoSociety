@@ -311,26 +311,83 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - DB repository SQL filter/keyset pagination contract,
   - DB repository audit logging contract.
 
-## Backend API SQL Club Member Pagination
+## Member Portal Profile API
 
-- Changed `GET /api/v1/clubs/{club_id}/members` so the API handler calls `DatabaseApiRepository.list_club_members(club_id, limit, cursor, filter_text)` instead of loading all club members and paginating in memory.
-- Kept the existing authorization rule unchanged:
-  - `admin` can read any club member list,
-  - `club_president` can read only clubs present in the JWT `club_ids` claim.
-- Added generic JSON keyset cursor helpers:
-  - `encode_keyset_cursor(values)`,
-  - `decode_keyset_cursor(cursor)`.
-- Implemented SQL-level club member listing in `DatabaseApiRepository`:
-  - filters by display name, email, phone, member status, and club role,
-  - escapes SQL LIKE wildcards,
-  - caps filter text at 100 characters through the shared `_like_filter()` helper,
-  - preserves existing desktop ordering semantics: club president first, then last name, first name, and `member_id`,
-  - uses a composite keyset cursor over role rank, normalized last name, normalized first name, and `member_id`,
-  - fetches `limit + 1` rows to decide whether `nextCursor` should be returned.
-- Added a lightweight `MemberRecord` API record so `backend.repository` still avoids importing the circular desktop `model` package.
-- Updated `docs/api/backend-api.md` with member filter and composite cursor semantics.
-- Updated `docs/api/openapi.yaml` with the `filter` query parameter for `/clubs/{clubId}/members`.
-- Updated `docs/api-oauth2-migration-plan.md` to mark club member SQL pagination/filtering as implemented.
+- Added the first member portal API endpoint: `GET /api/v1/me`.
+- Extended the development JWT auth context with a transitional member identity link:
+  - `member_id`,
+  - `memberId`.
+- `GET /api/v1/me` requires role `member` and one of those member identity claims.
+- If the token is authenticated but not linked to a member, the API returns `403` with error code `member_identity_required`.
+- The endpoint reads only the authenticated member's own profile through `DatabaseApiRepository.fetch_member_portal_profile(member_id)`.
+- The profile response includes:
+  - member id,
+  - status,
+  - display name and title/name fields,
+  - email and phone,
+  - portrait URL,
+  - primary club id/name,
+  - eCP active/validity/card/wallet status,
+  - latest pending eCP request summary.
+- The profile response intentionally does not expose:
+  - `ecp_hash`,
+  - encrypted birth date,
+  - address fields,
+  - DB/internal record hashes.
+- Added `member_profile_to_api()` serializer.
+- Added SQL lookup for member portal profiles with joins to:
+  - primary club affiliation,
+  - current eCP record by `members.ecp_hash`,
+  - latest pending `ecp_requests` row.
+- `POST /api/v1/me/ecp-requests` is intentionally not implemented in this slice. The existing approval flow requires an `ecp_record_id` with a valid `photo_hash`, so the next safe step is backend photo upload plus request creation in one flow.
+- Updated `docs/api/backend-api.md`, `docs/api/openapi.yaml`, and `docs/api-oauth2-migration-plan.md`.
 - Added tests for:
-  - API handler delegating club member pagination/filtering to the repository,
-  - DB repository SQL filter/composite-keyset pagination contract for club members.
+  - member role fetching its own portal profile,
+  - missing member identity claim returning `member_identity_required`,
+  - DB repository profile mapping and avoiding `birth_date_encrypted` selection.
+
+## Member Portal eCP Request API
+
+- Added `POST /api/v1/me/ecp-requests` as the next member portal flow from the author plan.
+- Added request body support to `ApiApp.handle_request()` and the WSGI adapter.
+- Added WSGI status mapping for:
+  - `201 Created`,
+  - `422 Unprocessable Entity`.
+- Request body is JSON:
+  - `photoBase64`: required base64 JPEG/PNG bytes,
+  - `contentType`: `image/jpeg` or `image/png`,
+  - `gdprConsent`: must be explicitly `true`,
+  - `notificationsEnabled`: optional, defaults to `true`.
+- Added validation errors:
+  - `invalid_request_body`,
+  - `photo_required`,
+  - `invalid_photo_base64`,
+  - `photo_too_large`,
+  - `unsupported_photo_content_type`,
+  - `gdpr_consent_required`.
+- Added duplicate pending request protection:
+  - repository checks for an existing `ecp_requests.status = 'pending'` row for the member before upload,
+  - API returns `409 ecp_request_already_pending`,
+  - no new photo is uploaded for duplicates.
+- Decoded photo data is capped at 5 MB.
+- Added `DatabaseApiRepository.create_member_ecp_request()`:
+  - generates a request photo hash,
+  - uploads the photo through an injected backend storage callable,
+  - creates an inactive `ecp_records` row,
+  - creates a pending `ecp_requests` row linked by `ecp_record_id`,
+  - returns request id, eCP record id, photo hash, photo URL, status, and request date.
+- Added backend-only helpers so the backend dev server does not import desktop `utils.py`:
+  - `backend.storage.make_gcs_upload_blob()`,
+  - `backend.crypto.make_check_hash_factory()`.
+- Updated `backend.dev_server` to inject GCS upload and check-hash generation into `DatabaseApiRepository`.
+- Updated OpenAPI, backend API manual, OAuth2 migration plan, and PR documentation.
+- Added tests for:
+  - member eCP request creation with photo upload,
+  - missing photo rejection,
+  - explicit GDPR consent requirement,
+  - oversized photo rejection,
+  - repository upload/record-linking SQL contract,
+  - WSGI request body forwarding.
+- Remaining hardening:
+  - add idempotency keys,
+  - add production-grade image inspection/face validation in the backend upload path.
