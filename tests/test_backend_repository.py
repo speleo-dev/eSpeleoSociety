@@ -156,6 +156,67 @@ class BackendRepositoryTest(unittest.TestCase):
         self.assertIn("WHERE m.member_id = %s", fake_db.last_query)
         self.assertNotIn("birth_date_encrypted", fake_db.last_query)
 
+    def test_list_club_members_uses_sql_filter_and_composite_cursor(self):
+        fake_db = FakeDbManager(rows=[
+            {
+                "member_id": 101,
+                "member_status": "active",
+                "title_prefix": "",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "title_suffix": "",
+                "phone": "0901",
+                "email": "ada@example.sk",
+                "ecp_hash": "ecp-1",
+                "primary_club_id": 1,
+                "club_role": "president",
+                "has_paid_current_year_fee": True,
+                "is_directory_stub": False,
+                "role_rank": 0,
+                "last_name_sort": "lovelace",
+                "first_name_sort": "ada",
+            },
+            {
+                "member_id": 102,
+                "member_status": "active",
+                "title_prefix": "",
+                "first_name": "Grace",
+                "last_name": "Hopper",
+                "title_suffix": "",
+                "phone": "0902",
+                "email": "grace@example.sk",
+                "ecp_hash": "",
+                "primary_club_id": 1,
+                "club_role": "member",
+                "has_paid_current_year_fee": False,
+                "is_directory_stub": False,
+                "role_rank": 1,
+                "last_name_sort": "hopper",
+                "first_name_sort": "grace",
+            },
+        ])
+        repository = DatabaseApiRepository(fake_db)
+
+        members, next_cursor = repository.list_club_members(
+            club_id=1,
+            limit=1,
+            cursor=None,
+            filter_text="ada",
+        )
+
+        self.assertEqual(len(members), 1)
+        self.assertEqual(members[0].first_name, "Ada")
+        self.assertTrue(members[0].is_president)
+        self.assertTrue(members[0].has_paid_current_year_fee)
+        self.assertIsNotNone(next_cursor)
+        self.assertIn("ca_assoc.club_id = %s", fake_db.last_query)
+        self.assertIn("ILIKE", fake_db.last_query)
+        self.assertIn("ORDER BY role_rank, last_name_sort, first_name_sort, m.member_id", fake_db.last_query)
+        self.assertIn("LIMIT %s", fake_db.last_query)
+        self.assertEqual(fake_db.last_params[1], 1)
+        self.assertEqual(fake_db.last_params[-1], 2)
+        self.assertIn("%ada%", fake_db.last_params)
+
     def test_create_member_ecp_request_uploads_photo_and_links_record(self):
         uploads = []
 

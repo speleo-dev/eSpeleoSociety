@@ -339,7 +339,7 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - primary club affiliation,
   - current eCP record by `members.ecp_hash`,
   - latest pending `ecp_requests` row.
-- `POST /api/v1/me/ecp-requests` is intentionally not implemented in this slice. The existing approval flow requires an `ecp_record_id` with a valid `photo_hash`, so the next safe step is backend photo upload plus request creation in one flow.
+- `POST /api/v1/me/ecp-requests` was added in the follow-up slice documented below.
 - Updated `docs/api/backend-api.md`, `docs/api/openapi.yaml`, and `docs/api-oauth2-migration-plan.md`.
 - Added tests for:
   - member role fetching its own portal profile,
@@ -352,6 +352,7 @@ After the signed eCP QR issuance and metadata persistence wiring:
 - Added request body support to `ApiApp.handle_request()` and the WSGI adapter.
 - Added WSGI status mapping for:
   - `201 Created`,
+  - `409 Conflict`,
   - `422 Unprocessable Entity`.
 - Request body is JSON:
   - `photoBase64`: required base64 JPEG/PNG bytes,
@@ -384,10 +385,25 @@ After the signed eCP QR issuance and metadata persistence wiring:
 - Added tests for:
   - member eCP request creation with photo upload,
   - missing photo rejection,
+  - non-object JSON body rejection,
   - explicit GDPR consent requirement,
   - oversized photo rejection,
+  - duplicate pending request rejection,
   - repository upload/record-linking SQL contract,
+  - repository duplicate-pending guard before upload,
   - WSGI request body forwarding.
 - Remaining hardening:
   - add idempotency keys,
   - add production-grade image inspection/face validation in the backend upload path.
+
+## Merge Order Repair for Combined PR Flow
+
+- The author merged PR #6 before PR #5, which left the combined `main` state with `ApiApp._list_club_members()` calling `repository.list_club_members()` while `DatabaseApiRepository` no longer had that method.
+- Restored `DatabaseApiRepository.list_club_members()` from the SQL pagination slice:
+  - keyset cursor over role rank, last name, first name, and member id,
+  - server-side club member filtering,
+  - current-year fee flag,
+  - president-first ordering,
+  - `MemberRecord` mapping for API serialization.
+- Restored the API fake repository method in tests so `GET /api/v1/clubs/{club_id}/members` uses the same interface as production code.
+- Re-added the repository contract test for club member SQL filtering and composite cursor behavior.
