@@ -1,14 +1,18 @@
 from dataclasses import dataclass
+import base64
+import binascii
 import json
 import uuid
 
 from backend.audit import AuditEvent
 from backend.auth import AuthError, authenticate_bearer, require_any_role
 from backend.pagination import paginate_items, parse_limit
-from backend.serializers import club_to_api, ecp_verification_to_api, member_to_api
+from backend.repository import DuplicatePendingEcpRequestError
+from backend.serializers import club_to_api, ecp_verification_to_api, member_profile_to_api, member_to_api
 
 
 API_VERSION = "v1"
+MAX_ECP_REQUEST_PHOTO_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -54,9 +58,10 @@ class ApiApp:
         self.audience = audience
         self.audit_sink = audit_sink or repository
 
-    def handle_request(self, method: str, path: str, headers=None, query=None) -> ApiResponse:
+    def handle_request(self, method: str, path: str, headers=None, query=None, body=None) -> ApiResponse:
         headers = headers or {}
         query = query or {}
+        body = body or ""
         request_id = headers.get("X-Request-ID") or headers.get("x-request-id") or f"req_{uuid.uuid4().hex}"
         context = None
         error_code = None
@@ -77,6 +82,10 @@ class ApiApp:
                     )
                     if method == "GET" and path == "/api/v1/clubs":
                         response = self._list_clubs(query, context)
+                    elif method == "GET" and path == "/api/v1/me":
+                        response = self._get_member_profile(context, request_id)
+                    elif method == "POST" and path == "/api/v1/me/ecp-requests":
+                        response = self._create_member_ecp_request(context, body, request_id)
                     else:
                         club_members_id = self._match_club_members_path(method, path)
                         if club_members_id is not None:
@@ -122,6 +131,10 @@ class ApiApp:
             return "/api/v1/health"
         if method == "GET" and path == "/api/v1/clubs":
             return "/api/v1/clubs"
+        if method == "GET" and path == "/api/v1/me":
+            return "/api/v1/me"
+        if method == "POST" and path == "/api/v1/me/ecp-requests":
+            return "/api/v1/me/ecp-requests"
         if self._match_club_members_path(method, path) is not None:
             return "/api/v1/clubs/{club_id}/members"
         if self._match_ecp_verify_path(method, path) is not None:
@@ -143,6 +156,69 @@ class ApiApp:
             {
                 "items": [club_to_api(club) for club in page],
                 "nextCursor": next_cursor,
+            },
+        )
+
+    def _get_member_profile(self, context, request_id: str) -> ApiResponse:
+        require_any_role(context, {"member"})
+        if context.member_id is None:
+            raise AuthError(403, "member_identity_required", "Authenticated caller is not linked to a member profile.")
+        profile = self.repository.fetch_member_portal_profile(context.member_id)
+        if not profile:
+            return error_response(404, "member_profile_not_found", "Member profile was not found.", request_id)
+        return json_response(200, member_profile_to_api(profile))
+
+    def _create_member_ecp_request(self, context, body: str, request_id: str) -> ApiResponse:
+        require_any_role(context, {"member"})
+        if context.member_id is None:
+            raise AuthError(403, "member_identity_required", "Authenticated caller is not linked to a member profile.")
+        try:
+            payload = json.loads(body or "{}")
+        except json.JSONDecodeError:
+            return error_response(400, "invalid_json", "Request body must be valid JSON.", request_id)
+        if not isinstance(payload, dict):
+            return error_response(422, "invalid_request_body", "Request body must be a JSON object.", request_id)
+        raw_photo = str(payload.get("photoBase64") or "").strip()
+        if not raw_photo:
+            return error_response(422, "photo_required", "photoBase64 is required.", request_id)
+        try:
+            photo_bytes = base64.b64decode(raw_photo, validate=True)
+        except (binascii.Error, ValueError):
+            return error_response(422, "invalid_photo_base64", "photoBase64 must be valid base64.", request_id)
+        if not photo_bytes:
+            return error_response(422, "photo_required", "photoBase64 is required.", request_id)
+        if len(photo_bytes) > MAX_ECP_REQUEST_PHOTO_BYTES:
+            return error_response(422, "photo_too_large", "Photo must be 5 MB or smaller.", request_id)
+        content_type = str(payload.get("contentType") or "image/jpeg").strip().lower()
+        if content_type not in {"image/jpeg", "image/png"}:
+            return error_response(422, "unsupported_photo_content_type", "Photo content type must be image/jpeg or image/png.", request_id)
+        if payload.get("gdprConsent") is not True:
+            return error_response(422, "gdpr_consent_required", "gdprConsent must be true to request eCP.", request_id)
+        try:
+            request = self.repository.create_member_ecp_request(
+                member_id=context.member_id,
+                photo_bytes=photo_bytes,
+                content_type=content_type,
+                gdpr_consent=True,
+                notifications_enabled=bool(payload.get("notificationsEnabled", True)),
+            )
+        except DuplicatePendingEcpRequestError:
+            return error_response(
+                409,
+                "ecp_request_already_pending",
+                "Member already has a pending eCP request.",
+                request_id,
+            )
+        return json_response(
+            201,
+            {
+                "id": request.get("request_id"),
+                "memberId": request.get("member_id"),
+                "ecpRecordId": request.get("ecp_record_id"),
+                "photoHash": request.get("photo_hash"),
+                "photoUrl": request.get("photo_url"),
+                "status": request.get("status"),
+                "requestDate": request.get("request_date"),
             },
         )
 
