@@ -4,7 +4,7 @@ import uuid
 
 from backend.audit import AuditEvent
 from backend.auth import AuthError, authenticate_bearer, require_any_role
-from backend.pagination import paginate_items, parse_limit
+from backend.pagination import parse_limit
 from backend.serializers import club_to_api, ecp_verification_to_api, member_to_api
 
 
@@ -152,8 +152,13 @@ class ApiApp:
             raise AuthError(403, "forbidden", "Authenticated caller is not allowed to access this club.")
         limit = parse_limit(query.get("limit"))
         cursor = query.get("cursor")
-        members = list(self.repository.fetch_members(club_id))
-        page, next_cursor = paginate_items(members, limit, cursor)
+        filter_text = query.get("filter") or query.get("q") or ""
+        page, next_cursor = self.repository.list_club_members(
+            club_id=club_id,
+            limit=limit,
+            cursor=cursor,
+            filter_text=filter_text,
+        )
         return json_response(
             200,
             {

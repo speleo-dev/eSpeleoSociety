@@ -79,12 +79,12 @@ Current skeleton choices:
 - `club_president` access is constrained by JWT `club_ids`.
 - Public eCP verification endpoint returns only verification-safe details and excludes contact/address/birth-date fields.
 - `GET /api/v1/clubs` uses SQL-level keyset pagination and a case-insensitive `filter` query parameter.
+- `GET /api/v1/clubs/{club_id}/members` uses SQL-level composite keyset pagination and a case-insensitive `filter` query parameter.
 - API requests are written to the existing sanitized `db_logs` path as compact route-template audit events.
 
 Production hardening still required:
 
 - Replace HS256 with OIDC/JWKS validation.
-- Move club member list pagination/filtering into SQL.
 - Replace transitional `db_logs` API audit with a dedicated API audit table.
 - Add rate limiting, especially for public eCP verification.
 - Add write endpoints only after service-layer authorization is in place.

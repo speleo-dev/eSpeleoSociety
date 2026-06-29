@@ -98,6 +98,15 @@ Requires:
 
 The response includes operational member data needed for administration. This endpoint should not be exposed to ordinary members.
 
+Query:
+
+- `limit`: default `50`, max `200`
+- `cursor`: opaque composite cursor from the previous response
+- `filter`: optional case-insensitive search over display name, email, phone, member status, and club role
+- `q`: alias for `filter`
+
+The current implementation performs member filtering and pagination in SQL using a composite keyset cursor over role priority, last name, first name, and `member_id`. This keeps club presidents first while avoiding full-table fetches.
+
 ### `GET /api/v1/ecp/verify/{token}`
 
 Public tokenized online eCP verification endpoint.
@@ -175,7 +184,7 @@ Authorization: Bearer <jwt>
 ## Known Limitations
 
 - The API still uses the existing PostgreSQL schema and DB manager.
-- `GET /api/v1/clubs` has SQL-level filtering and keyset pagination; `GET /api/v1/clubs/{club_id}/members` still uses the desktop DB manager path before API-level pagination.
+- `GET /api/v1/clubs` and `GET /api/v1/clubs/{club_id}/members` have SQL-level filtering and keyset pagination.
 - JWT validation is development-only HS256. Production should use OIDC/JWKS.
 - No write endpoints exist yet.
 - No refresh tokens, login UI, or portal session handling exists yet.
@@ -183,8 +192,8 @@ Authorization: Bearer <jwt>
 
 ## Next Backend Slices
 
-1. Add SQL-level pagination and search for club members.
-2. Add a dedicated API audit table and rate limiting.
+1. Add a dedicated API audit table and rate limiting.
+2. Add portal-member endpoint for "my profile" and "request eCP".
 3. Add eCP revocation/renewal endpoints behind `admin`.
-4. Add portal-member endpoint for "my profile" and "request eCP".
-5. Replace HS256 development JWT validation with OIDC discovery and JWKS.
+4. Replace HS256 development JWT validation with OIDC discovery and JWKS.
+5. Switch desktop read paths to the API client.

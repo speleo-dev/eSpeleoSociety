@@ -310,3 +310,27 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - public eCP verification audit without raw token persistence,
   - DB repository SQL filter/keyset pagination contract,
   - DB repository audit logging contract.
+
+## Backend API SQL Club Member Pagination
+
+- Changed `GET /api/v1/clubs/{club_id}/members` so the API handler calls `DatabaseApiRepository.list_club_members(club_id, limit, cursor, filter_text)` instead of loading all club members and paginating in memory.
+- Kept the existing authorization rule unchanged:
+  - `admin` can read any club member list,
+  - `club_president` can read only clubs present in the JWT `club_ids` claim.
+- Added generic JSON keyset cursor helpers:
+  - `encode_keyset_cursor(values)`,
+  - `decode_keyset_cursor(cursor)`.
+- Implemented SQL-level club member listing in `DatabaseApiRepository`:
+  - filters by display name, email, phone, member status, and club role,
+  - escapes SQL LIKE wildcards,
+  - caps filter text at 100 characters through the shared `_like_filter()` helper,
+  - preserves existing desktop ordering semantics: club president first, then last name, first name, and `member_id`,
+  - uses a composite keyset cursor over role rank, normalized last name, normalized first name, and `member_id`,
+  - fetches `limit + 1` rows to decide whether `nextCursor` should be returned.
+- Added a lightweight `MemberRecord` API record so `backend.repository` still avoids importing the circular desktop `model` package.
+- Updated `docs/api/backend-api.md` with member filter and composite cursor semantics.
+- Updated `docs/api/openapi.yaml` with the `filter` query parameter for `/clubs/{clubId}/members`.
+- Updated `docs/api-oauth2-migration-plan.md` to mark club member SQL pagination/filtering as implemented.
+- Added tests for:
+  - API handler delegating club member pagination/filtering to the repository,
+  - DB repository SQL filter/composite-keyset pagination contract for club members.
