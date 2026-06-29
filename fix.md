@@ -310,3 +310,38 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - public eCP verification audit without raw token persistence,
   - DB repository SQL filter/keyset pagination contract,
   - DB repository audit logging contract.
+
+## Member Portal Profile API
+
+- Added the first member portal API endpoint: `GET /api/v1/me`.
+- Extended the development JWT auth context with a transitional member identity link:
+  - `member_id`,
+  - `memberId`.
+- `GET /api/v1/me` requires role `member` and one of those member identity claims.
+- If the token is authenticated but not linked to a member, the API returns `403` with error code `member_identity_required`.
+- The endpoint reads only the authenticated member's own profile through `DatabaseApiRepository.fetch_member_portal_profile(member_id)`.
+- The profile response includes:
+  - member id,
+  - status,
+  - display name and title/name fields,
+  - email and phone,
+  - portrait URL,
+  - primary club id/name,
+  - eCP active/validity/card/wallet status,
+  - latest pending eCP request summary.
+- The profile response intentionally does not expose:
+  - `ecp_hash`,
+  - encrypted birth date,
+  - address fields,
+  - DB/internal record hashes.
+- Added `member_profile_to_api()` serializer.
+- Added SQL lookup for member portal profiles with joins to:
+  - primary club affiliation,
+  - current eCP record by `members.ecp_hash`,
+  - latest pending `ecp_requests` row.
+- `POST /api/v1/me/ecp-requests` is intentionally not implemented in this slice. The existing approval flow requires an `ecp_record_id` with a valid `photo_hash`, so the next safe step is backend photo upload plus request creation in one flow.
+- Updated `docs/api/backend-api.md`, `docs/api/openapi.yaml`, and `docs/api-oauth2-migration-plan.md`.
+- Added tests for:
+  - member role fetching its own portal profile,
+  - missing member identity claim returning `member_identity_required`,
+  - DB repository profile mapping and avoiding `birth_date_encrypted` selection.

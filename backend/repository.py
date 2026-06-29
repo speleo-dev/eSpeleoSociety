@@ -79,6 +79,73 @@ class DatabaseApiRepository:
     def fetch_members(self, club_id: int):
         return self.db_manager.fetch_members(club_id)
 
+    def fetch_member_portal_profile(self, member_id: int):
+        row = self.db_manager._fetch_one(
+            """
+            SELECT
+                m.member_id,
+                m.member_status AS status,
+                m.title_prefix,
+                m.first_name,
+                m.last_name,
+                m.title_suffix,
+                trim(concat_ws(' ', NULLIF(m.title_prefix, ''), m.first_name, m.last_name, NULLIF(m.title_suffix, ''))) AS display_name,
+                m.email,
+                m.phone,
+                m.portrait_url,
+                ca.club_id AS primary_club_id,
+                c.club_name AS primary_club_name,
+                er.ecp_active,
+                er.valid_until AS ecp_valid_until,
+                er.verification_url AS ecp_verification_url,
+                er.card_image_url AS ecp_card_image_url,
+                er.card_pdf_url AS ecp_card_pdf_url,
+                er.wallet_status AS ecp_wallet_status,
+                pending.request_id AS pending_ecp_request_id,
+                pending.status AS pending_ecp_request_status,
+                pending.request_date AS pending_ecp_request_date
+            FROM members m
+            LEFT JOIN club_affiliations ca ON ca.member_id = m.member_id AND ca.is_primary_club = TRUE
+            LEFT JOIN clubs c ON c.club_id = ca.club_id
+            LEFT JOIN ecp_records er ON er.ecp_hash = m.ecp_hash
+            LEFT JOIN LATERAL (
+                SELECT r.request_id, r.status, r.request_date
+                FROM ecp_requests r
+                WHERE r.member_id = m.member_id AND r.status = 'pending'
+                ORDER BY r.request_date DESC, r.request_id DESC
+                LIMIT 1
+            ) pending ON TRUE
+            WHERE m.member_id = %s
+            LIMIT 1;
+            """,
+            (member_id,),
+        )
+        if not row:
+            return None
+        return {
+            "member_id": row["member_id"],
+            "status": row["status"],
+            "title_prefix": row["title_prefix"],
+            "first_name": row["first_name"],
+            "last_name": row["last_name"],
+            "title_suffix": row["title_suffix"],
+            "display_name": row["display_name"],
+            "email": row["email"],
+            "phone": row["phone"],
+            "portrait_url": row["portrait_url"],
+            "primary_club_id": row["primary_club_id"],
+            "primary_club_name": row["primary_club_name"],
+            "ecp_active": row["ecp_active"],
+            "ecp_valid_until": self._date_to_iso(row["ecp_valid_until"]),
+            "ecp_verification_url": row["ecp_verification_url"],
+            "ecp_card_image_url": row["ecp_card_image_url"],
+            "ecp_card_pdf_url": row["ecp_card_pdf_url"],
+            "ecp_wallet_status": row["ecp_wallet_status"],
+            "pending_ecp_request_id": row["pending_ecp_request_id"],
+            "pending_ecp_request_status": row["pending_ecp_request_status"],
+            "pending_ecp_request_date": self._date_to_iso(row["pending_ecp_request_date"]),
+        }
+
     def record_api_audit_event(self, event: AuditEvent):
         details = json.dumps(
             {
@@ -131,6 +198,9 @@ class DatabaseApiRepository:
             webpage=row["webpage"],
             president_name_text=row["president_name_text"],
         )
+
+    def _date_to_iso(self, value):
+        return value.isoformat() if hasattr(value, "isoformat") else value
 
     def fetch_ecp_verification_by_token(self, token: str):
         if not TOKEN_RE.match(token or ""):

@@ -87,6 +87,23 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /me:
+    get:
+      summary: Get own member portal profile
+      description: Requires role `member` and token claim `member_id` or `memberId`.
+      responses:
+        "200":
+          description: Authenticated member profile and eCP/request status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /ecp/verify/{token}:
     get:
       summary: Verify an eCP by online token
@@ -212,6 +229,78 @@ components:
           type: boolean
         hasEcp:
           type: boolean
+    MemberProfile:
+      type: object
+      required: [id, status, titlePrefix, firstName, lastName, titleSuffix, displayName, email, phone, primaryClub, hasEcp, ecp, pendingEcpRequest]
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        titlePrefix:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        titleSuffix:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        portraitUrl:
+          type: string
+          nullable: true
+        primaryClub:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: integer
+              nullable: true
+            name:
+              type: string
+        hasEcp:
+          type: boolean
+        ecp:
+          type: object
+          nullable: true
+          required: [active, validUntil, verificationUrl, cardImageUrl, cardPdfUrl, walletStatus]
+          properties:
+            active:
+              type: boolean
+            validUntil:
+              type: string
+              format: date
+              nullable: true
+            verificationUrl:
+              type: string
+              nullable: true
+            cardImageUrl:
+              type: string
+              nullable: true
+            cardPdfUrl:
+              type: string
+              nullable: true
+            walletStatus:
+              type: string
+              nullable: true
+        pendingEcpRequest:
+          type: object
+          nullable: true
+          required: [id, status, requestDate]
+          properties:
+            id:
+              type: integer
+            status:
+              type: string
+            requestDate:
+              type: string
+              format: date
+              nullable: true
     EcpVerification:
       type: object
       required: [memberId, displayName, clubName, status, validUntil, legalDocumentUrl, payloadHash]

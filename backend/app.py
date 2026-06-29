@@ -5,7 +5,7 @@ import uuid
 from backend.audit import AuditEvent
 from backend.auth import AuthError, authenticate_bearer, require_any_role
 from backend.pagination import paginate_items, parse_limit
-from backend.serializers import club_to_api, ecp_verification_to_api, member_to_api
+from backend.serializers import club_to_api, ecp_verification_to_api, member_profile_to_api, member_to_api
 
 
 API_VERSION = "v1"
@@ -77,6 +77,8 @@ class ApiApp:
                     )
                     if method == "GET" and path == "/api/v1/clubs":
                         response = self._list_clubs(query, context)
+                    elif method == "GET" and path == "/api/v1/me":
+                        response = self._get_member_profile(context, request_id)
                     else:
                         club_members_id = self._match_club_members_path(method, path)
                         if club_members_id is not None:
@@ -122,6 +124,8 @@ class ApiApp:
             return "/api/v1/health"
         if method == "GET" and path == "/api/v1/clubs":
             return "/api/v1/clubs"
+        if method == "GET" and path == "/api/v1/me":
+            return "/api/v1/me"
         if self._match_club_members_path(method, path) is not None:
             return "/api/v1/clubs/{club_id}/members"
         if self._match_ecp_verify_path(method, path) is not None:
@@ -145,6 +149,15 @@ class ApiApp:
                 "nextCursor": next_cursor,
             },
         )
+
+    def _get_member_profile(self, context, request_id: str) -> ApiResponse:
+        require_any_role(context, {"member"})
+        if context.member_id is None:
+            raise AuthError(403, "member_identity_required", "Authenticated caller is not linked to a member profile.")
+        profile = self.repository.fetch_member_portal_profile(context.member_id)
+        if not profile:
+            return error_response(404, "member_profile_not_found", "Member profile was not found.", request_id)
+        return json_response(200, member_profile_to_api(profile))
 
     def _list_club_members(self, club_id: int, query: dict, context) -> ApiResponse:
         require_any_role(context, {"admin", "club_president"})

@@ -110,6 +110,41 @@ class BackendRepositoryTest(unittest.TestCase):
         self.assertEqual(fake_db.last_params[-1], 2)
         self.assertIn("%nit%", fake_db.last_params)
 
+    def test_fetch_member_portal_profile_maps_self_service_fields(self):
+        fake_db = FakeDbManager(row={
+            "member_id": 101,
+            "status": "active",
+            "title_prefix": "",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "title_suffix": "",
+            "display_name": "Ada Lovelace",
+            "email": "ada@example.sk",
+            "phone": "0901",
+            "portrait_url": "https://storage.example/portrait.jpg",
+            "primary_club_id": 1,
+            "primary_club_name": "Alpha",
+            "ecp_active": True,
+            "ecp_valid_until": date(2027, 6, 29),
+            "ecp_verification_url": "https://storage.example/ecp_verify/token.html",
+            "ecp_card_image_url": "https://storage.example/card.jpg",
+            "ecp_card_pdf_url": "https://storage.example/card.pdf",
+            "ecp_wallet_status": "issued",
+            "pending_ecp_request_id": 55,
+            "pending_ecp_request_status": "pending",
+            "pending_ecp_request_date": date(2026, 6, 29),
+        })
+        repository = DatabaseApiRepository(fake_db)
+
+        profile = repository.fetch_member_portal_profile(101)
+
+        self.assertEqual(profile["display_name"], "Ada Lovelace")
+        self.assertEqual(profile["ecp_valid_until"], "2027-06-29")
+        self.assertEqual(profile["pending_ecp_request_date"], "2026-06-29")
+        self.assertEqual(fake_db.last_params, (101,))
+        self.assertIn("WHERE m.member_id = %s", fake_db.last_query)
+        self.assertNotIn("birth_date_encrypted", fake_db.last_query)
+
     def test_record_api_audit_event_uses_db_log_without_raw_tokens(self):
         fake_db = FakeDbManager()
         repository = DatabaseApiRepository(fake_db)

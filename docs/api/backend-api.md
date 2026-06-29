@@ -11,6 +11,7 @@ Implemented API routes:
 - `GET /api/v1/health`
 - `GET /api/v1/clubs`
 - `GET /api/v1/clubs/{club_id}/members`
+- `GET /api/v1/me`
 - `GET /api/v1/ecp/verify/{token}`
 
 OpenAPI contract:
@@ -29,11 +30,13 @@ Development skeleton validation:
 - required subject claim: `sub`
 - roles claim: `roles`, `scope`, or `realm_access.roles`
 - club president scope: `club_ids`
+- member portal link: `member_id` or `memberId`
 
 Supported roles in this slice:
 
 - `admin`
 - `club_president`
+- `member`
 
 Final production direction:
 
@@ -97,6 +100,49 @@ Requires:
 - `club_president` with `{club_id}` present in the JWT `club_ids` claim.
 
 The response includes operational member data needed for administration. This endpoint should not be exposed to ordinary members.
+
+### `GET /api/v1/me`
+
+Requires role `member` and a JWT `member_id` or `memberId` claim.
+
+This endpoint is the first member portal API slice. It returns the authenticated member's own profile and eCP/request status without exposing internal hashes, encrypted birth date, or address fields.
+
+Response:
+
+```json
+{
+  "id": 101,
+  "status": "active",
+  "titlePrefix": "",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "titleSuffix": "",
+  "displayName": "Ada Lovelace",
+  "email": "ada@example.sk",
+  "phone": "0901",
+  "portraitUrl": "https://storage.example/portrait.jpg",
+  "primaryClub": {
+    "id": 1,
+    "name": "Speleo Club"
+  },
+  "hasEcp": true,
+  "ecp": {
+    "active": true,
+    "validUntil": "2027-06-29",
+    "verificationUrl": "https://storage.example/ecp_verify/token.html",
+    "cardImageUrl": "https://storage.example/card.jpg",
+    "cardPdfUrl": "https://storage.example/card.pdf",
+    "walletStatus": "issued"
+  },
+  "pendingEcpRequest": {
+    "id": 55,
+    "status": "pending",
+    "requestDate": "2026-06-29"
+  }
+}
+```
+
+If the token is authenticated but has no member link, the API returns `403` with code `member_identity_required`.
 
 ### `GET /api/v1/ecp/verify/{token}`
 
@@ -179,6 +225,7 @@ Authorization: Bearer <jwt>
 - JWT validation is development-only HS256. Production should use OIDC/JWKS.
 - No write endpoints exist yet.
 - No refresh tokens, login UI, or portal session handling exists yet.
+- `POST /api/v1/me/ecp-requests` is intentionally not implemented in this slice because the existing approval flow requires an `ecp_record_id` with a stored `photo_hash`; it should be added together with a backend photo upload endpoint.
 - API request audit currently writes through the existing `db_logs` table; a dedicated API audit table and rate limiting are still required.
 
 ## Next Backend Slices
@@ -186,5 +233,5 @@ Authorization: Bearer <jwt>
 1. Add SQL-level pagination and search for club members.
 2. Add a dedicated API audit table and rate limiting.
 3. Add eCP revocation/renewal endpoints behind `admin`.
-4. Add portal-member endpoint for "my profile" and "request eCP".
+4. Add portal member photo upload and `POST /api/v1/me/ecp-requests`.
 5. Replace HS256 development JWT validation with OIDC discovery and JWKS.

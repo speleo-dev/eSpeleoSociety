@@ -15,6 +15,7 @@ class EmptyRepository:
 class ClubRepository:
     def __init__(self):
         self.list_calls = []
+        self.profile_calls = []
         self.clubs = [
             SimpleNamespace(
                 club_id=1,
@@ -78,6 +79,34 @@ class ClubRepository:
                 "street": "Street 1",
             }
         }
+        self.member_profiles = {
+            101: {
+                "member_id": 101,
+                "status": "active",
+                "title_prefix": "",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "title_suffix": "",
+                "display_name": "Ada Lovelace",
+                "email": "ada@example.sk",
+                "phone": "0901",
+                "primary_club_id": 1,
+                "primary_club_name": "Alpha",
+                "portrait_url": "https://storage.example/portrait.jpg",
+                "ecp_active": True,
+                "ecp_valid_until": "2027-06-29",
+                "ecp_verification_url": "https://storage.example/ecp_verify/token.html",
+                "ecp_card_image_url": "https://storage.example/card.jpg",
+                "ecp_card_pdf_url": "https://storage.example/card.pdf",
+                "ecp_wallet_status": "issued",
+                "pending_ecp_request_id": 55,
+                "pending_ecp_request_status": "pending",
+                "pending_ecp_request_date": "2026-06-29",
+                "ecp_hash": "must-not-leak",
+                "birth_date_encrypted": "must-not-leak",
+                "street": "must-not-leak",
+            }
+        }
 
     def fetch_clubs(self):
         return self.clubs
@@ -100,6 +129,10 @@ class ClubRepository:
 
     def fetch_members(self, club_id: int):
         return self.members_by_club.get(club_id, [])
+
+    def fetch_member_portal_profile(self, member_id: int):
+        self.profile_calls.append(member_id)
+        return self.member_profiles.get(member_id)
 
     def fetch_ecp_verification_by_token(self, token: str):
         return self.ecp_verifications.get(token)
@@ -188,6 +221,46 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(json.loads(allowed.body)["items"][0]["firstName"], "Ada")
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(json.loads(denied.body)["error"]["code"], "forbidden")
+
+    def test_member_can_fetch_own_portal_profile(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="member-101", roles=["member"], member_id=101)
+        audit_sink = AuditSink()
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret, audit_sink=audit_sink)
+
+        response = app.handle_request(
+            "GET",
+            "/api/v1/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["id"], 101)
+        self.assertEqual(payload["displayName"], "Ada Lovelace")
+        self.assertEqual(payload["primaryClub"], {"id": 1, "name": "Alpha"})
+        self.assertTrue(payload["hasEcp"])
+        self.assertEqual(payload["ecp"]["validUntil"], "2027-06-29")
+        self.assertEqual(payload["pendingEcpRequest"]["id"], 55)
+        self.assertNotIn("ecpHash", payload)
+        self.assertNotIn("birthDate", payload)
+        self.assertNotIn("street", payload)
+        self.assertEqual(app.repository.profile_calls, [101])
+        self.assertEqual(audit_sink.events[0].route, "/api/v1/me")
+
+    def test_member_profile_requires_member_identity_claim(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="member-without-link", roles=["member"])
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret)
+
+        response = app.handle_request(
+            "GET",
+            "/api/v1/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "member_identity_required")
 
     def test_ecp_verify_token_returns_public_detail_without_contact_data(self):
         audit_sink = AuditSink()
