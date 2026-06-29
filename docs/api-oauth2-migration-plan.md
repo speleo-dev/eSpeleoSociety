@@ -66,6 +66,7 @@ Implemented routes:
 - `GET /api/v1/clubs`
 - `GET /api/v1/clubs/{club_id}/members`
 - `GET /api/v1/me`
+- `POST /api/v1/me/ecp-requests`
 - `GET /api/v1/ecp/verify/{token}`
 
 Contract:
@@ -79,6 +80,7 @@ Current skeleton choices:
 - Roles: `admin`, `club_president`.
 - `club_president` access is constrained by JWT `club_ids`.
 - Member portal profile access uses role `member` plus JWT `member_id` / `memberId` as the transitional identity link.
+- Member portal eCP request creation accepts a base64 JPEG/PNG photo, creates an inactive `ecp_records` row, and links the pending `ecp_requests` row by `ecp_record_id`.
 - Public eCP verification endpoint returns only verification-safe details and excludes contact/address/birth-date fields.
 - `GET /api/v1/clubs` uses SQL-level keyset pagination and a case-insensitive `filter` query parameter.
 - API requests are written to the existing sanitized `db_logs` path as compact route-template audit events.
@@ -89,7 +91,7 @@ Production hardening still required:
 - Move club member list pagination/filtering into SQL.
 - Replace transitional `db_logs` API audit with a dedicated API audit table.
 - Add rate limiting, especially for public eCP verification.
-- Add backend photo upload before exposing `POST /api/v1/me/ecp-requests`, because approval currently requires an `ecp_record_id` with a stored `photo_hash`.
+- Add idempotency keys and duplicate-pending-request protection for portal eCP request creation.
 - Add write endpoints only after service-layer authorization is in place.
 
 ## Migration Sequence

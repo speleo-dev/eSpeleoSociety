@@ -1,3 +1,4 @@
+import base64
 import json
 import unittest
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ class ClubRepository:
     def __init__(self):
         self.list_calls = []
         self.profile_calls = []
+        self.created_ecp_requests = []
         self.clubs = [
             SimpleNamespace(
                 club_id=1,
@@ -133,6 +135,25 @@ class ClubRepository:
     def fetch_member_portal_profile(self, member_id: int):
         self.profile_calls.append(member_id)
         return self.member_profiles.get(member_id)
+
+    def create_member_ecp_request(self, member_id: int, photo_bytes: bytes, content_type: str, gdpr_consent=True, notifications_enabled=True):
+        request = {
+            "request_id": 77,
+            "member_id": member_id,
+            "ecp_record_id": 88,
+            "photo_hash": "photo-hash-1",
+            "status": "pending",
+            "request_date": "2026-06-29",
+            "photo_url": "https://storage.example/ecp-request-photos/photo-hash-1.jpg",
+        }
+        self.created_ecp_requests.append({
+            "member_id": member_id,
+            "photo_bytes": photo_bytes,
+            "content_type": content_type,
+            "gdpr_consent": gdpr_consent,
+            "notifications_enabled": notifications_enabled,
+        })
+        return request
 
     def fetch_ecp_verification_by_token(self, token: str):
         return self.ecp_verifications.get(token)
@@ -261,6 +282,107 @@ class BackendApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(json.loads(response.body)["error"]["code"], "member_identity_required")
+
+    def test_member_can_create_ecp_request_with_photo_upload(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="member-101", roles=["member"], member_id=101)
+        audit_sink = AuditSink()
+        repository = ClubRepository()
+        app = ApiApp(repository=repository, jwt_secret=secret, audit_sink=audit_sink)
+
+        response = app.handle_request(
+            "POST",
+            "/api/v1/me/ecp-requests",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({
+                "photoBase64": "cG9ydHJhaXQ=",
+                "contentType": "image/jpeg",
+                "gdprConsent": True,
+                "notificationsEnabled": False,
+            }),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["id"], 77)
+        self.assertEqual(payload["status"], "pending")
+        self.assertEqual(payload["ecpRecordId"], 88)
+        self.assertEqual(repository.created_ecp_requests, [{
+            "member_id": 101,
+            "photo_bytes": b"portrait",
+            "content_type": "image/jpeg",
+            "gdpr_consent": True,
+            "notifications_enabled": False,
+        }])
+        self.assertEqual(audit_sink.events[0].route, "/api/v1/me/ecp-requests")
+
+    def test_ecp_request_rejects_missing_photo(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="member-101", roles=["member"], member_id=101)
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret)
+
+        response = app.handle_request(
+            "POST",
+            "/api/v1/me/ecp-requests",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({}),
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "photo_required")
+
+    def test_ecp_request_rejects_non_object_json_body(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="member-101", roles=["member"], member_id=101)
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret)
+
+        response = app.handle_request(
+            "POST",
+            "/api/v1/me/ecp-requests",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps([]),
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "invalid_request_body")
+
+    def test_ecp_request_requires_explicit_gdpr_consent(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="member-101", roles=["member"], member_id=101)
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret)
+
+        response = app.handle_request(
+            "POST",
+            "/api/v1/me/ecp-requests",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({
+                "photoBase64": "cG9ydHJhaXQ=",
+                "contentType": "image/jpeg",
+                "gdprConsent": False,
+            }),
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "gdpr_consent_required")
+
+    def test_ecp_request_rejects_oversized_photo(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="member-101", roles=["member"], member_id=101)
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret)
+
+        response = app.handle_request(
+            "POST",
+            "/api/v1/me/ecp-requests",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({
+                "photoBase64": base64.b64encode(b"x" * ((5 * 1024 * 1024) + 1)).decode("ascii"),
+                "contentType": "image/jpeg",
+                "gdprConsent": True,
+            }),
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "photo_too_large")
 
     def test_ecp_verify_token_returns_public_detail_without_contact_data(self):
         audit_sink = AuditSink()

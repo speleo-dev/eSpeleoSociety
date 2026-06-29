@@ -5,10 +5,12 @@ from backend.app import ApiApp
 
 STATUS_TEXT = {
     200: "OK",
+    201: "Created",
     400: "Bad Request",
     401: "Unauthorized",
     403: "Forbidden",
     404: "Not Found",
+    422: "Unprocessable Entity",
     500: "Internal Server Error",
 }
 
@@ -29,6 +31,16 @@ def _query_from_environ(environ) -> dict[str, str]:
     return {key: values[-1] for key, values in parsed.items()}
 
 
+def _body_from_environ(environ) -> str:
+    try:
+        length = int(environ.get("CONTENT_LENGTH") or 0)
+    except ValueError:
+        length = 0
+    if length <= 0:
+        return ""
+    return environ.get("wsgi.input").read(length).decode("utf-8")
+
+
 def make_wsgi_app(api_app: ApiApp):
     def application(environ, start_response):
         response = api_app.handle_request(
@@ -36,6 +48,7 @@ def make_wsgi_app(api_app: ApiApp):
             path=environ.get("PATH_INFO", "/"),
             headers=_headers_from_environ(environ),
             query=_query_from_environ(environ),
+            body=_body_from_environ(environ),
         )
         status_line = f"{response.status_code} {STATUS_TEXT.get(response.status_code, 'Unknown')}"
         body = response.body.encode("utf-8")

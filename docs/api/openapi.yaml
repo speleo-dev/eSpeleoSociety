@@ -104,6 +104,31 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /me/ecp-requests:
+    post:
+      summary: Request own eCP
+      description: Requires role `member` and token claim `member_id` or `memberId`. Uploads a photo and creates a pending eCP request linked to an inactive eCP record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EcpRequestCreate"
+      responses:
+        "201":
+          description: Pending eCP request was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EcpRequestCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /ecp/verify/{token}:
     get:
       summary: Verify an eCP by online token
@@ -157,6 +182,12 @@ components:
         maxLength: 100
       description: Case-insensitive search over club name, city, email, phone, webpage, and public president text.
   responses:
+    BadRequest:
+      description: Request body is malformed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     Unauthorized:
       description: Missing or invalid bearer token.
       content:
@@ -171,6 +202,12 @@ components:
             $ref: "#/components/schemas/ErrorEnvelope"
     NotFound:
       description: Resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    UnprocessableEntity:
+      description: Request body is syntactically valid but failed validation.
       content:
         application/json:
           schema:
@@ -301,6 +338,43 @@ components:
               type: string
               format: date
               nullable: true
+    EcpRequestCreate:
+      type: object
+      required: [photoBase64, contentType, gdprConsent]
+      properties:
+        photoBase64:
+          type: string
+          description: Base64-encoded JPEG or PNG photo bytes. Decoded size must be 5 MB or smaller.
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png]
+        gdprConsent:
+          type: boolean
+          description: Must be explicitly true.
+        notificationsEnabled:
+          type: boolean
+          default: true
+    EcpRequestCreated:
+      type: object
+      required: [id, memberId, ecpRecordId, photoHash, photoUrl, status, requestDate]
+      properties:
+        id:
+          type: integer
+        memberId:
+          type: integer
+        ecpRecordId:
+          type: integer
+        photoHash:
+          type: string
+        photoUrl:
+          type: string
+          nullable: true
+        status:
+          type: string
+          example: pending
+        requestDate:
+          type: string
+          format: date
     EcpVerification:
       type: object
       required: [memberId, displayName, clubName, status, validUntil, legalDocumentUrl, payloadHash]

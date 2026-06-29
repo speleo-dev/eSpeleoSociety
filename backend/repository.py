@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import json
 import re
+import secrets
 
 from backend.audit import AuditEvent
 from backend.pagination import decode_id_cursor, encode_id_cursor
@@ -29,8 +30,10 @@ class ClubRecord:
 
 
 class DatabaseApiRepository:
-    def __init__(self, db_manager):
+    def __init__(self, db_manager, upload_blob=None, check_hash_factory=None):
         self.db_manager = db_manager
+        self.upload_blob = upload_blob
+        self.check_hash_factory = check_hash_factory or (lambda: secrets.token_urlsafe(32))
 
     def fetch_clubs(self):
         return self.db_manager.fetch_clubs()
@@ -144,6 +147,64 @@ class DatabaseApiRepository:
             "pending_ecp_request_id": row["pending_ecp_request_id"],
             "pending_ecp_request_status": row["pending_ecp_request_status"],
             "pending_ecp_request_date": self._date_to_iso(row["pending_ecp_request_date"]),
+        }
+
+    def create_member_ecp_request(
+        self,
+        member_id: int,
+        photo_bytes: bytes,
+        content_type: str,
+        gdpr_consent=True,
+        notifications_enabled=True,
+    ):
+        if not self.upload_blob:
+            raise RuntimeError("Photo upload backend is not configured.")
+        extension = ".png" if content_type == "image/png" else ".jpg"
+        photo_hash = secrets.token_hex(32)
+        blob_name = f"ecp_request_photos/{photo_hash}{extension}"
+        photo_url = self.upload_blob(blob_name, photo_bytes, content_type)
+        ecp_hash = secrets.token_hex(32)
+        ecp_row = self.db_manager._fetch_one(
+            """
+            INSERT INTO ecp_records (
+                ecp_hash,
+                gdpr_consent,
+                notifications_enabled,
+                photo_hash,
+                ecp_active,
+                check_hash
+            )
+            VALUES (%s, %s, %s, %s, FALSE, %s)
+            RETURNING ecp_record_id;
+            """,
+            (
+                ecp_hash,
+                bool(gdpr_consent),
+                bool(notifications_enabled),
+                photo_hash,
+                self.check_hash_factory(),
+            ),
+        )
+        ecp_record_id = ecp_row["ecp_record_id"] if isinstance(ecp_row, dict) else ecp_row[0]
+        request_row = self.db_manager._fetch_one(
+            """
+            INSERT INTO ecp_requests (member_id, ecp_record_id, status, request_date)
+            VALUES (%s, %s, 'pending', CURRENT_DATE)
+            RETURNING request_id, request_date;
+            """,
+            (member_id, ecp_record_id),
+        )
+        request_id = request_row["request_id"] if isinstance(request_row, dict) else request_row[0]
+        request_date = request_row["request_date"] if isinstance(request_row, dict) else request_row[1]
+        self.db_manager._log_action("INSERT", "ecp_requests", f"Inserted portal eCP request for member ID {member_id}")
+        return {
+            "request_id": request_id,
+            "member_id": member_id,
+            "ecp_record_id": ecp_record_id,
+            "photo_hash": photo_hash,
+            "photo_url": photo_url,
+            "status": "pending",
+            "request_date": self._date_to_iso(request_date),
         }
 
     def record_api_audit_event(self, event: AuditEvent):

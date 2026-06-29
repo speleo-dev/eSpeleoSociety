@@ -345,3 +345,46 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - member role fetching its own portal profile,
   - missing member identity claim returning `member_identity_required`,
   - DB repository profile mapping and avoiding `birth_date_encrypted` selection.
+
+## Member Portal eCP Request API
+
+- Added `POST /api/v1/me/ecp-requests` as the next member portal flow from the author plan.
+- Added request body support to `ApiApp.handle_request()` and the WSGI adapter.
+- Added WSGI status mapping for:
+  - `201 Created`,
+  - `422 Unprocessable Entity`.
+- Request body is JSON:
+  - `photoBase64`: required base64 JPEG/PNG bytes,
+  - `contentType`: `image/jpeg` or `image/png`,
+  - `gdprConsent`: must be explicitly `true`,
+  - `notificationsEnabled`: optional, defaults to `true`.
+- Added validation errors:
+  - `invalid_request_body`,
+  - `photo_required`,
+  - `invalid_photo_base64`,
+  - `photo_too_large`,
+  - `unsupported_photo_content_type`,
+  - `gdpr_consent_required`.
+- Decoded photo data is capped at 5 MB.
+- Added `DatabaseApiRepository.create_member_ecp_request()`:
+  - generates a request photo hash,
+  - uploads the photo through an injected backend storage callable,
+  - creates an inactive `ecp_records` row,
+  - creates a pending `ecp_requests` row linked by `ecp_record_id`,
+  - returns request id, eCP record id, photo hash, photo URL, status, and request date.
+- Added backend-only helpers so the backend dev server does not import desktop `utils.py`:
+  - `backend.storage.make_gcs_upload_blob()`,
+  - `backend.crypto.make_check_hash_factory()`.
+- Updated `backend.dev_server` to inject GCS upload and check-hash generation into `DatabaseApiRepository`.
+- Updated OpenAPI, backend API manual, OAuth2 migration plan, and PR documentation.
+- Added tests for:
+  - member eCP request creation with photo upload,
+  - missing photo rejection,
+  - explicit GDPR consent requirement,
+  - oversized photo rejection,
+  - repository upload/record-linking SQL contract,
+  - WSGI request body forwarding.
+- Remaining hardening:
+  - add idempotency keys,
+  - prevent duplicate pending eCP requests per member,
+  - add production-grade image inspection/face validation in the backend upload path.
