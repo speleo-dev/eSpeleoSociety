@@ -1,0 +1,250 @@
+openapi: 3.0.3
+info:
+  title: eSpeleoSociety API
+  version: 0.1.0
+  description: Transitional backend API skeleton for the desktop admin client and future portals.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: API is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: v1
+  /clubs:
+    get:
+      summary: List clubs
+      description: Requires role `admin` or `club_president`.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated club list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Club"
+                  nextCursor:
+                    type: string
+                    nullable: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /clubs/{clubId}/members:
+    get:
+      summary: List members of a club
+      description: Requires role `admin`, or `club_president` with the requested club id in the token `club_ids` claim.
+      parameters:
+        - name: clubId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated club members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Member"
+                  nextCursor:
+                    type: string
+                    nullable: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /ecp/verify/{token}:
+    get:
+      summary: Verify an eCP by online token
+      security: []
+      description: Public tokenized online verification. The response intentionally excludes address, phone, email, and birth date.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 12
+      responses:
+        "200":
+          description: Public eCP verification details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EcpVerification"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Opaque cursor returned by a previous list response.
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Authenticated caller is not allowed to access the resource.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    Club:
+      type: object
+      required: [id, name, street, city, zipCode, country, email, phone, webpage, presidentName, memberCount]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        street:
+          type: string
+        city:
+          type: string
+        zipCode:
+          type: string
+        country:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        webpage:
+          type: string
+        presidentName:
+          type: string
+        memberCount:
+          type: integer
+    Member:
+      type: object
+      required: [id, status, titlePrefix, firstName, lastName, titleSuffix, email, phone, primaryClubId, isPresident, hasEcp]
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        titlePrefix:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        titleSuffix:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        primaryClubId:
+          type: integer
+          nullable: true
+        isPresident:
+          type: boolean
+        hasEcp:
+          type: boolean
+    EcpVerification:
+      type: object
+      required: [memberId, displayName, clubName, status, validUntil, legalDocumentUrl, payloadHash]
+      properties:
+        memberId:
+          type: integer
+        displayName:
+          type: string
+        clubName:
+          type: string
+        status:
+          type: string
+        validUntil:
+          type: string
+          format: date
+          nullable: true
+        portraitUrl:
+          type: string
+          nullable: true
+        cardImageUrl:
+          type: string
+          nullable: true
+        cardPdfUrl:
+          type: string
+          nullable: true
+        legalDocumentUrl:
+          type: string
+          nullable: true
+        payloadHash:
+          type: string
+          nullable: true
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            requestId:
+              type: string

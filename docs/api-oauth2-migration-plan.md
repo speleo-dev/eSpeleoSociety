@@ -56,6 +56,36 @@ Use an asymmetric signature for offline verification so scanner apps can verify 
 
 The desktop client currently has a transitional signed-QR implementation so issued eCP cards can be verified offline before the backend exists. During the API migration, move the private signing key and QR generation behind the backend and remove private signing secrets from desktop installations.
 
+## Implemented Backend Skeleton
+
+The first backend slice now exists under `backend/` and is documented in `docs/api/backend-api.md`.
+
+Implemented routes:
+
+- `GET /api/v1/health`
+- `GET /api/v1/clubs`
+- `GET /api/v1/clubs/{club_id}/members`
+- `GET /api/v1/ecp/verify/{token}`
+
+Contract:
+
+- `docs/api/openapi.yaml`
+
+Current skeleton choices:
+
+- WSGI adapter with no web framework dependency.
+- Development JWT validation through HS256.
+- Roles: `admin`, `club_president`.
+- `club_president` access is constrained by JWT `club_ids`.
+- Public eCP verification endpoint returns only verification-safe details and excludes contact/address/birth-date fields.
+
+Production hardening still required:
+
+- Replace HS256 with OIDC/JWKS validation.
+- Move list pagination/filtering into SQL.
+- Add audit logging and rate limiting.
+- Add write endpoints only after service-layer authorization is in place.
+
 ## Migration Sequence
 
 1. Add API client abstraction to the PyQt app while keeping `DatabaseManager` for current behavior.

@@ -248,3 +248,37 @@ After the signed eCP QR issuance and metadata persistence wiring:
 - Full local verification after this change:
   - `rtk .venv/bin/python -m unittest discover -s tests -v`: 63 tests passed, 1 PostgreSQL integration test skipped because `ESPELEO_TEST_DATABASE_URL` is not set.
   - `rtk .venv/bin/python -m compileall -q .`: passed.
+
+## Backend API/OAuth2 Skeleton
+
+- Added a new `backend/` package as the first step toward moving DB, eCP verification, and portal access behind an HTTP API.
+- Added `backend.app.ApiApp` with a testable `handle_request()` interface.
+- Added WSGI adapter and development server:
+  - `backend/wsgi.py`
+  - `backend/dev_server.py`
+- Added development OAuth2-style bearer JWT validation in `backend/auth.py`.
+- Current JWT skeleton validates:
+  - HS256 signature,
+  - audience `espeleo-api`,
+  - issuer `espeleo-test`,
+  - subject `sub`,
+  - roles from `roles`, `scope`, or `realm_access.roles`,
+  - club president restrictions through `club_ids`.
+- Implemented first API routes:
+  - `GET /api/v1/health` public,
+  - `GET /api/v1/clubs` for `admin` or `club_president`,
+  - `GET /api/v1/clubs/{club_id}/members` for `admin` or president of that club,
+  - `GET /api/v1/ecp/verify/{token}` public tokenized eCP online verification.
+- Added cursor pagination helpers with default limit `50` and max limit `200`.
+- Added public API serializers so endpoint JSON does not expose internal model names.
+- Added eCP verification serializer that intentionally excludes email, phone, address, and birth date.
+- Added `DatabaseApiRepository` adapter over the existing `db_manager`.
+- Added token validation before DB lookup for eCP online verification tokens.
+- Added OpenAPI contract at `docs/api/openapi.yaml`.
+- Added backend API manual at `docs/api/backend-api.md`.
+- Updated `docs/api-oauth2-migration-plan.md` with the implemented skeleton and hardening gaps.
+- Added tests for health, missing bearer token, admin club list pagination, club president member authorization, eCP public verification sanitization, WSGI adapter behavior, and DB repository token lookup.
+- Full local verification after this backend skeleton:
+  - `rtk .venv/bin/python -m unittest discover -s tests -v`: 73 tests passed, 1 PostgreSQL integration test skipped because `ESPELEO_TEST_DATABASE_URL` is not set.
+  - `rtk .venv/bin/python -m compileall -q .`: passed.
+  - `rtk git diff --check`: passed.
