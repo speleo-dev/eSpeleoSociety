@@ -55,6 +55,8 @@ def create_ecp_claim(
     valid_until,
     paid_year: int | None = None,
     issued_at=None,
+    verification_url: str | None = None,
+    legal_documents: list[dict] | None = None,
 ) -> dict:
     if issued_at is None:
         issued_at = datetime.now(timezone.utc)
@@ -70,6 +72,10 @@ def create_ecp_claim(
     }
     if paid_year is not None:
         claim["paid_year"] = int(paid_year)
+    if verification_url:
+        claim["verification_url"] = verification_url
+    if legal_documents:
+        claim["legal_documents"] = deepcopy(legal_documents)
     return claim
 
 

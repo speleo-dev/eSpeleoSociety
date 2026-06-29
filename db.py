@@ -18,6 +18,11 @@ SENSITIVE_LOG_KEYS = (
     "email",
     "phone",
     "photo_hash",
+    "portrait_hash",
+    "portrait_url",
+    "verification_url",
+    "card_image_url",
+    "card_pdf_url",
     "smtp_password",
     "smtp_user",
     "street",
@@ -51,6 +56,13 @@ def sanitize_log_details(details: str) -> str:
         sanitized = prose_pattern.sub(r"\1[REDACTED]", sanitized)
 
     return sanitized
+
+
+def _row_get(row, key, index):
+    try:
+        return row[key]
+    except (KeyError, TypeError, IndexError):
+        return row[index]
 
 
 class DatabaseManager:
@@ -120,10 +132,10 @@ class DatabaseManager:
     # ----- Read operations (specific methods) -----
     def fetch_clubs(self) -> List[Club]:
         query = """
-        SELECT c.club_id, c.club_name, c.street, c.city, c.zip_code, c.country, c.email, c.phone,
-               c.president_id, c.foundation_date, c.logo_url,
+        SELECT c.club_id, c.club_name, c.street, c.city, c.zip_code, c.country, c.email, c.phone, c.webpage,
+               c.president_id, c.president_name_text, c.foundation_date, c.logo_url,
                COUNT(ca.member_id) AS member_count,
-               COALESCE(m.first_name || ' ' || m.last_name, '') as president_name
+               COALESCE(NULLIF(c.president_name_text, ''), NULLIF(m.first_name || ' ' || m.last_name, ''), '') as president_name
         FROM clubs c
         LEFT JOIN club_affiliations ca ON c.club_id = ca.club_id
         LEFT JOIN members m ON c.president_id = m.member_id
@@ -146,16 +158,18 @@ class DatabaseManager:
                 president_name=row['president_name'],
                 foundation_date=row['foundation_date'],
                 member_count=row['member_count'],
-                logo_url=row['logo_url']
+                logo_url=row['logo_url'],
+                webpage=row['webpage'],
+                president_name_text=row['president_name_text'],
             ))
         return clubs
 
     def fetch_club_by_id(self, club_id: int) -> Club:
         query = """
         SELECT c.club_id, c.club_name, c.street, c.city, c.zip_code, c.country, 
-               c.email, c.phone, c.president_id, c.foundation_date, c.logo_url,
+               c.email, c.phone, c.webpage, c.president_id, c.president_name_text, c.foundation_date, c.logo_url,
                (SELECT COUNT(ca.member_id) FROM club_affiliations ca WHERE ca.club_id = c.club_id) AS member_count,
-               COALESCE(m.first_name || ' ' || m.last_name, '') as president_name
+               COALESCE(NULLIF(c.president_name_text, ''), NULLIF(m.first_name || ' ' || m.last_name, ''), '') as president_name
         FROM clubs c
         LEFT JOIN members m ON c.president_id = m.member_id
         WHERE c.club_id = %s;
@@ -175,7 +189,9 @@ class DatabaseManager:
                 president_name=row['president_name'],
                 foundation_date=row['foundation_date'],
                 member_count=row['member_count'],
-                logo_url=row['logo_url']
+                logo_url=row['logo_url'],
+                webpage=row['webpage'],
+                president_name_text=row['president_name_text'],
             )
         return None
 
@@ -185,7 +201,9 @@ class DatabaseManager:
         SELECT m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
                m.birth_date_encrypted, m.street, m.city, m.zip_code, m.country,
                m.phone, m.email, m.ecp_hash,
-               m.discounted_membership, ca.club_id as primary_club_id
+               m.discounted_membership, m.portrait_url, m.portrait_hash,
+               m.portrait_face_detected, m.portrait_updated_at,
+               ca.club_id as primary_club_id
         FROM members m
         JOIN club_affiliations ca ON ca.member_id = m.member_id
         WHERE m.member_id = %s AND ca.is_primary_club = TRUE
@@ -209,7 +227,11 @@ class DatabaseManager:
                 ecp_hash=row['ecp_hash'],
                 discounted_membership=row['discounted_membership'],
                 primary_club_id=row['primary_club_id'],
-                member_id=row['member_id']
+                member_id=row['member_id'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
             )
         return None
     
@@ -218,7 +240,9 @@ class DatabaseManager:
         SELECT m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
                m.birth_date_encrypted, m.street, m.city, m.zip_code, m.country,
                m.phone, m.email, m.ecp_hash,
-               m.discounted_membership, ca.club_id as primary_club_id
+               m.discounted_membership, m.portrait_url, m.portrait_hash,
+               m.portrait_face_detected, m.portrait_updated_at,
+               ca.club_id as primary_club_id
         FROM members m
         JOIN club_affiliations ca ON ca.member_id = m.member_id
         WHERE m.ecp_hash = %s AND ca.is_primary_club = TRUE
@@ -242,7 +266,11 @@ class DatabaseManager:
                 ecp_hash=row['ecp_hash'],
                 discounted_membership=row['discounted_membership'],
                 primary_club_id=row['primary_club_id'],
-                member_id=row['member_id']
+                member_id=row['member_id'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
             )
         return None
 
@@ -252,7 +280,9 @@ class DatabaseManager:
         SELECT
             m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
             m.birth_date_encrypted, m.street, m.city, m.zip_code, m.country,
-            m.phone, m.email, m.ecp_hash, m.discounted_membership,
+            m.phone, m.email, m.ecp_hash, m.discounted_membership, m.is_directory_stub,
+            m.portrait_url, m.portrait_hash, m.portrait_face_detected, m.portrait_updated_at,
+            ca_assoc.role AS club_role,
             (SELECT sub_ca.club_id FROM club_affiliations sub_ca
              WHERE sub_ca.member_id = m.member_id AND sub_ca.is_primary_club = TRUE LIMIT 1) as primary_club_id,
             EXISTS (
@@ -262,7 +292,7 @@ class DatabaseManager:
         FROM members m
         JOIN club_affiliations ca_assoc ON m.member_id = ca_assoc.member_id
         WHERE ca_assoc.club_id = %s
-        ORDER BY m.last_name, m.first_name;
+        ORDER BY CASE WHEN ca_assoc.role = 'president' THEN 0 ELSE 1 END, m.last_name, m.first_name;
         """
         rows = self._fetch_all(query, (current_year, club_id,))
         members = []
@@ -284,7 +314,13 @@ class DatabaseManager:
                 discounted_membership=row['discounted_membership'],
                 primary_club_id=row['primary_club_id'],
                 member_id=row['member_id'],
-                has_paid_current_year_fee=row['has_paid_current_year_fee']
+                has_paid_current_year_fee=row['has_paid_current_year_fee'],
+                is_president=row['club_role'] == 'president',
+                is_directory_stub=row['is_directory_stub'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
            ))
         return members
 
@@ -296,7 +332,8 @@ class DatabaseManager:
         SELECT
             m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
             m.birth_date_encrypted, m.street, m.city, m.zip_code, m.country,
-            m.phone, m.email, m.ecp_hash, m.discounted_membership,
+            m.phone, m.email, m.ecp_hash, m.discounted_membership, m.is_directory_stub,
+            m.portrait_url, m.portrait_hash, m.portrait_face_detected, m.portrait_updated_at,
             (SELECT sub_ca.club_id FROM club_affiliations sub_ca
              WHERE sub_ca.member_id = m.member_id AND sub_ca.is_primary_club = TRUE LIMIT 1) as primary_club_id,
             EXISTS (
@@ -335,14 +372,19 @@ class DatabaseManager:
                 ecp_hash=row['ecp_hash'],
                 discounted_membership=row['discounted_membership'],
                 primary_club_id=row['primary_club_id'],
-                member_id=row['member_id'], has_paid_current_year_fee=row['has_paid_current_year_fee']
+                member_id=row['member_id'], has_paid_current_year_fee=row['has_paid_current_year_fee'],
+                is_directory_stub=row['is_directory_stub'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
             ))
         return members
 
     # Separated methods for club affiliations
     def fetch_memberships_by_member(self, member_id: int) -> List[Membership]:
         query = """
-        SELECT c.club_id, ca.member_id, c.club_name, c.president_id, ca.is_primary_club
+        SELECT c.club_id, ca.member_id, c.club_name, c.president_id, ca.is_primary_club, ca.role
         FROM club_affiliations ca
         JOIN clubs c ON c.club_id = ca.club_id
         WHERE ca.member_id = %s
@@ -356,17 +398,18 @@ class DatabaseManager:
                 member_id=row['member_id'],
                 club_name=row['club_name'],
                 president_id=row['president_id'],
-                is_primary_club=row['is_primary_club']
+                is_primary_club=row['is_primary_club'],
+                role=row['role'],
             ))
         return memberships
 
     def fetch_memberships_by_club(self, club_id: int) -> List[Membership]:
         query = """
-        SELECT c.club_id, ca.member_id, c.club_name, c.president_id, ca.is_primary_club
+        SELECT c.club_id, ca.member_id, c.club_name, c.president_id, ca.is_primary_club, ca.role
         FROM clubs c
         JOIN club_affiliations ca ON ca.club_id = c.club_id
         WHERE ca.club_id = %s
-        ORDER BY c.club_name;
+        ORDER BY CASE WHEN ca.role = 'president' THEN 0 ELSE 1 END, c.club_name;
         """
         rows = self._fetch_all(query, (club_id,))
         memberships = []
@@ -376,7 +419,8 @@ class DatabaseManager:
                 member_id=row['member_id'],
                 club_name=row['club_name'],
                 president_id=row['president_id'],
-                is_primary_club=row['is_primary_club']
+                is_primary_club=row['is_primary_club'],
+                role=row['role'],
             ))
         return memberships
 
@@ -409,6 +453,10 @@ class DatabaseManager:
             wallet_status=self._row_get(row, 'wallet_status'),
             wallet_object_id=self._row_get(row, 'wallet_object_id'),
             wallet_last_error=self._row_get(row, 'wallet_last_error'),
+            verification_url=self._row_get(row, 'verification_url'),
+            card_image_url=self._row_get(row, 'card_image_url'),
+            card_pdf_url=self._row_get(row, 'card_pdf_url'),
+            legal_document_url=self._row_get(row, 'legal_document_url'),
         )
 
     def fetch_ecp(self, hash_ecp: str) -> Ecp:
@@ -416,7 +464,8 @@ class DatabaseManager:
         SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
                er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
                er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
-               er.wallet_object_id, er.wallet_last_error, m.member_id
+               er.wallet_object_id, er.wallet_last_error, er.verification_url,
+               er.card_image_url, er.card_pdf_url, er.legal_document_url, m.member_id
         FROM ecp_records er
         JOIN members m ON m.ecp_hash = er.ecp_hash
         WHERE er.ecp_hash = %s;
@@ -431,7 +480,8 @@ class DatabaseManager:
         SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
                er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
                er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
-               er.wallet_object_id, er.wallet_last_error
+               er.wallet_object_id, er.wallet_last_error, er.verification_url,
+               er.card_image_url, er.card_pdf_url, er.legal_document_url
         FROM ecp_records er
         WHERE er.photo_hash = %s;
         """
@@ -445,7 +495,8 @@ class DatabaseManager:
         SELECT er.ecp_record_id, er.ecp_hash, er.gdpr_consent, er.notifications_enabled,
                er.photo_hash, er.ecp_active, er.check_hash, er.qr_url, er.qr_key_id,
                er.qr_payload_hash, er.issued_at, er.valid_until, er.wallet_status,
-               er.wallet_object_id, er.wallet_last_error
+               er.wallet_object_id, er.wallet_last_error, er.verification_url,
+               er.card_image_url, er.card_pdf_url, er.legal_document_url
         FROM ecp_records er
         WHERE er.ecp_record_id = %s;
         """
@@ -497,7 +548,9 @@ class DatabaseManager:
             foundation_date = %s,
             phone = %s,
             email = %s,
+            webpage = %s,
             president_id = %s,
+            president_name_text = %s,
             logo_url = %s
         WHERE club_id = %s;
         """
@@ -510,7 +563,9 @@ class DatabaseManager:
             club.foundation_date,
             club.phone,
             club.email,
+            club.webpage,
             club.president_id,
+            club.president_name_text,
             club.logo_url,
             club.club_id
         )
@@ -519,8 +574,11 @@ class DatabaseManager:
 
     def insert_club(self, club: Club):
         query = """
-        INSERT INTO clubs (club_name, street, city, zip_code, country, foundation_date, phone, email, president_id, logo_url)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO clubs (
+            club_name, street, city, zip_code, country, foundation_date,
+            phone, email, webpage, president_id, president_name_text, logo_url
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING club_id;
         """
         params = (
@@ -532,7 +590,9 @@ class DatabaseManager:
             club.foundation_date,
             club.phone,
             club.email,
+            club.webpage,
             club.president_id,
+            club.president_name_text,
             club.logo_url
         )
         new_id_row = self._fetch_one(query, params)
@@ -541,6 +601,180 @@ class DatabaseManager:
             self._log_action("INSERT", "clubs", f"Inserted club ID {new_id}")
             return new_id
         return None
+
+    def upsert_club_directory_entry(
+        self,
+        club_name: str,
+        president_name_text: str,
+        president_title_prefix: str,
+        president_first_name: str,
+        president_last_name: str,
+        president_title_suffix: str,
+        phone: str,
+        email: str,
+        webpage: str,
+        country: str = "SK",
+    ):
+        update_query = """
+        UPDATE clubs
+        SET president_name_text = %s,
+            phone = %s,
+            email = %s,
+            webpage = %s,
+            country = COALESCE(NULLIF(country, ''), %s)
+        WHERE lower(trim(club_name)) = lower(trim(%s))
+        RETURNING club_id;
+        """
+        params = (president_name_text, phone, email, webpage, country, club_name)
+        updated_row = self._fetch_one(update_query, params)
+        if updated_row:
+            club_id = updated_row[0]
+            self._log_action("UPDATE", "clubs", f"Updated SSS directory club ID {club_id}")
+        else:
+            insert_query = """
+            INSERT INTO clubs (club_name, president_name_text, phone, email, webpage, country)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING club_id;
+            """
+            insert_params = (club_name, president_name_text, phone, email, webpage, country)
+            inserted_row = self._fetch_one(insert_query, insert_params)
+            if not inserted_row:
+                return None
+            club_id = inserted_row[0]
+            self._log_action("INSERT", "clubs", f"Inserted SSS directory club ID {club_id}")
+
+        if president_name_text:
+            member_id = self.upsert_directory_president_member(
+                club_id=club_id,
+                title_prefix=president_title_prefix,
+                first_name=president_first_name,
+                last_name=president_last_name,
+                title_suffix=president_title_suffix,
+                phone=phone,
+                email=email,
+                country=country,
+            )
+            if member_id:
+                self.insert_memberships(
+                    member_id=member_id,
+                    club_id=club_id,
+                    primary_club=True,
+                    role="president",
+                )
+                self._execute(
+                    "UPDATE clubs SET president_id = %s WHERE club_id = %s;",
+                    (member_id, club_id),
+                )
+                self._log_action("UPDATE", "clubs", f"Linked SSS directory president member ID {member_id} to club ID {club_id}")
+        return club_id
+
+    def upsert_directory_president_member(
+        self,
+        club_id: int,
+        title_prefix: str,
+        first_name: str,
+        last_name: str,
+        title_suffix: str,
+        phone: str,
+        email: str,
+        country: str = "SK",
+    ):
+        existing_president_query = """
+        SELECT m.member_id, m.is_directory_stub
+        FROM clubs c
+        JOIN members m ON m.member_id = c.president_id
+        WHERE c.club_id = %s
+        LIMIT 1;
+        """
+        existing_president = self._fetch_one(existing_president_query, (club_id,))
+        if existing_president:
+            member_id = _row_get(existing_president, "member_id", 0)
+            if _row_get(existing_president, "is_directory_stub", 1):
+                self._update_directory_stub_member(
+                    member_id,
+                    title_prefix,
+                    first_name,
+                    last_name,
+                    title_suffix,
+                    phone,
+                    email,
+                    country,
+                )
+            return member_id
+
+        same_name_query = """
+        SELECT m.member_id, m.is_directory_stub
+        FROM members m
+        JOIN club_affiliations ca ON ca.member_id = m.member_id
+        WHERE ca.club_id = %s
+          AND lower(trim(m.first_name)) = lower(trim(%s))
+          AND lower(trim(m.last_name)) = lower(trim(%s))
+        ORDER BY m.is_directory_stub DESC, m.member_id
+        LIMIT 1;
+        """
+        same_name = self._fetch_one(same_name_query, (club_id, first_name, last_name))
+        if same_name:
+            member_id = _row_get(same_name, "member_id", 0)
+            if _row_get(same_name, "is_directory_stub", 1):
+                self._update_directory_stub_member(
+                    member_id,
+                    title_prefix,
+                    first_name,
+                    last_name,
+                    title_suffix,
+                    phone,
+                    email,
+                    country,
+                )
+            return member_id
+
+        insert_query = """
+        INSERT INTO members (
+            title_prefix, first_name, last_name, title_suffix, birth_date_encrypted,
+            street, city, zip_code, country, phone, email, member_status,
+            discounted_membership, is_directory_stub
+        )
+        VALUES (%s, %s, %s, %s, NULL, '', '', '', %s, %s, %s, 'active', false, true)
+        RETURNING member_id;
+        """
+        inserted = self._fetch_one(
+            insert_query,
+            (title_prefix, first_name, last_name, title_suffix, country, phone, email),
+        )
+        if inserted:
+            member_id = inserted[0]
+            self._log_action("INSERT", "members", f"Inserted SSS directory president member ID {member_id}")
+            return member_id
+        return None
+
+    def _update_directory_stub_member(
+        self,
+        member_id: int,
+        title_prefix: str,
+        first_name: str,
+        last_name: str,
+        title_suffix: str,
+        phone: str,
+        email: str,
+        country: str,
+    ):
+        query = """
+        UPDATE members
+        SET title_prefix = %s,
+            first_name = %s,
+            last_name = %s,
+            title_suffix = %s,
+            country = COALESCE(NULLIF(country, ''), %s),
+            phone = %s,
+            email = %s
+        WHERE member_id = %s
+          AND is_directory_stub IS TRUE;
+        """
+        self._execute(
+            query,
+            (title_prefix, first_name, last_name, title_suffix, country, phone, email, member_id),
+        )
+        self._log_action("UPDATE", "members", f"Updated SSS directory president member ID {member_id}")
 
     def update_member(self, member: Member):
         query = """
@@ -577,10 +811,108 @@ class DatabaseManager:
         self._execute(query, params)
         self._log_action("UPDATE", "members", f"Updated member ID {member.member_id}")
 
+    def update_member_birth_date(self, member_id: int, birth_date):
+        query = """
+        UPDATE members
+        SET birth_date_encrypted = CASE
+            WHEN %s IS NULL THEN NULL
+            ELSE encode(encrypt(%s, %s, 'aes'::text), 'hex')
+        END
+        WHERE member_id = %s;
+        """
+        birth_date_payload = None
+        if birth_date:
+            if isinstance(birth_date, (datetime.date, datetime.datetime)):
+                birth_date_payload = birth_date.isoformat().encode("utf-8")
+            else:
+                birth_date_payload = str(birth_date).encode("utf-8")
+        encryption_key_bytes = secret_manager.get_secret("crypt_key").encode("utf-8")
+        self._execute(
+            query,
+            (birth_date_payload, birth_date_payload, encryption_key_bytes, member_id),
+        )
+        self._log_action("UPDATE", "members", f"Updated birth date for member ID {member_id}")
+
+    def update_member_portrait(
+        self,
+        member_id: int,
+        portrait_url: str,
+        portrait_hash: str,
+        face_detected: bool,
+    ):
+        query = """
+        UPDATE members
+        SET portrait_url = %s,
+            portrait_hash = %s,
+            portrait_face_detected = %s,
+            portrait_updated_at = CURRENT_TIMESTAMP
+        WHERE member_id = %s;
+        """
+        self._execute(query, (portrait_url, portrait_hash, face_detected, member_id))
+        self._log_action("UPDATE", "members", f"Updated portrait metadata for member ID {member_id}")
+
+    def set_club_member_role(self, club_id: int, member_id: int, role: str):
+        if role not in {"member", "president"}:
+            raise ValueError("Unsupported club member role.")
+
+        if role == "president":
+            self._execute(
+                """
+                UPDATE club_affiliations
+                SET role = 'member'
+                WHERE club_id = %s
+                  AND role = 'president';
+                """,
+                (club_id,),
+            )
+            self._execute(
+                """
+                UPDATE club_affiliations
+                SET role = %s,
+                    is_primary_club = TRUE
+                WHERE club_id = %s
+                  AND member_id = %s;
+                """,
+                (role, club_id, member_id),
+            )
+            self.set_primary_memberships(member_id=member_id, club_id=club_id)
+            self._execute(
+                "UPDATE clubs SET president_id = %s WHERE club_id = %s;",
+                (member_id, club_id),
+            )
+        else:
+            self._execute(
+                """
+                UPDATE club_affiliations
+                SET role = %s
+                WHERE club_id = %s
+                  AND member_id = %s;
+                """,
+                (role, club_id, member_id),
+            )
+            self._execute(
+                """
+                UPDATE clubs
+                SET president_id = NULL
+                WHERE club_id = %s
+                  AND president_id = %s;
+                """,
+                (club_id, member_id),
+            )
+        self._log_action("UPDATE", "club_affiliations", f"Set role {role} for member ID {member_id} in club ID {club_id}")
+
     def insert_member(self, member: Member):
         query = """
-        INSERT INTO members (title_prefix, first_name, last_name, title_suffix, birth_date_encrypted, street, city, zip_code, country, phone, email, member_status, discounted_membership)
-        VALUES (%s, %s, %s, %s, encode(encrypt(%s, %s, 'aes'::text), 'hex'), %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO members (
+            title_prefix, first_name, last_name, title_suffix, birth_date_encrypted,
+            street, city, zip_code, country, phone, email, member_status,
+            discounted_membership, is_directory_stub
+        )
+        VALUES (
+            %s, %s, %s, %s,
+            CASE WHEN %s IS NULL THEN NULL ELSE encode(encrypt(%s, %s, 'aes'::text), 'hex') END,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
         RETURNING member_id;
         """
         # Convert birth_date to UTF-8 encoded bytes of its ISO format string, or None
@@ -601,6 +933,7 @@ class DatabaseManager:
             member.last_name,
             member.title_suffix,
             birth_date_payload,  # Pass as bytes or None
+            birth_date_payload,  # Pass as bytes or None for encryption when present
             encryption_key_bytes, # Pass key as bytes
             member.street,
             member.city,
@@ -609,7 +942,8 @@ class DatabaseManager:
             member.phone,
             member.email,
             member.status,
-            member.discounted_membership
+            member.discounted_membership,
+            member.is_directory_stub,
         )
         row = self._fetch_one(query, params)
         if row:
@@ -623,16 +957,28 @@ class DatabaseManager:
         self._execute(query, (member_id,))
         self._log_action("DELETE", "members", f"Deleted member with ID: {member_id}")
 
-    def insert_memberships(self, member_id: int, club_id: int, primary_club: bool = False):
+    def insert_memberships(
+        self,
+        member_id: int,
+        club_id: int,
+        primary_club: bool = False,
+        role: str = "member",
+    ):
         query = """
-        INSERT INTO club_affiliations (member_id, club_id, is_primary_club)
-        VALUES (%s, %s, %s)
+        INSERT INTO club_affiliations (member_id, club_id, is_primary_club, role)
+        VALUES (%s, %s, %s, %s)
         ON CONFLICT (member_id, club_id)
-        DO UPDATE SET is_primary_club = club_affiliations.is_primary_club OR EXCLUDED.is_primary_club;
+        DO UPDATE SET
+            is_primary_club = club_affiliations.is_primary_club OR EXCLUDED.is_primary_club,
+            role = CASE
+                WHEN club_affiliations.role = 'president' OR EXCLUDED.role = 'president'
+                    THEN 'president'
+                ELSE EXCLUDED.role
+            END;
         """
-        params = (member_id, club_id, primary_club)
+        params = (member_id, club_id, primary_club, role)
         self._execute(query, params)
-        self._log_action("INSERT", "club_affiliations", f"Inserted membership for member ID {member_id} in club ID {club_id}, primary: {primary_club}")
+        self._log_action("INSERT", "club_affiliations", f"Inserted membership for member ID {member_id} in club ID {club_id}, primary: {primary_club}, role: {role}")
 
     def set_primary_memberships(self, member_id: int, club_id: int):
         query = """
@@ -709,6 +1055,10 @@ class DatabaseManager:
         issued_at,
         valid_until,
         wallet_status: str = "not_issued",
+        verification_url: str | None = None,
+        card_image_url: str | None = None,
+        card_pdf_url: str | None = None,
+        legal_document_url: str | None = None,
     ):
         query = """
         UPDATE ecp_records
@@ -721,6 +1071,10 @@ class DatabaseManager:
             issued_at = %s,
             valid_until = %s,
             wallet_status = %s,
+            verification_url = %s,
+            card_image_url = %s,
+            card_pdf_url = %s,
+            legal_document_url = %s,
             wallet_last_error = NULL
         WHERE ecp_record_id = %s;
         """
@@ -733,6 +1087,10 @@ class DatabaseManager:
             issued_at,
             valid_until,
             wallet_status,
+            verification_url,
+            card_image_url,
+            card_pdf_url,
+            legal_document_url,
             ecp_record_id,
         )
         self._execute(query, params)

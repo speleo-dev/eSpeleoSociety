@@ -360,7 +360,8 @@ Ucel:
 - drzi kontaktne udaje,
 - drzi status clenstva,
 - drzi aktualny eCP hash,
-- drzi informaciu o zlavnenom clenstve.
+- drzi informaciu o zlavnenom clenstve,
+- vie oznacit adresarovy stub zaznam z verejneho SSS importu.
 
 Najdolezitejsie polia:
 
@@ -369,12 +370,13 @@ Najdolezitejsie polia:
 | `member_id` | Primarny kluc clena |
 | `first_name` | Meno |
 | `last_name` | Priezvisko |
-| `birth_date_encrypted` | Sifrovany datum narodenia |
-| `email` | Email, potrebny pre eCP vydanie |
-| `phone` | Telefon |
+| `birth_date_encrypted` | Sifrovany datum narodenia; moze byt prazdny pri adresarovom stub clenovi |
+| `email` | Email alebo viac emailov oddelenych ciarkou |
+| `phone` | Telefon alebo viac telefonov oddelenych ciarkou |
 | `ecp_hash` | Aktualny hash vydaneho eCP |
 | `member_status` | Stav clena |
 | `discounted_membership` | Ci ma clen zlavneny poplatok |
+| `is_directory_stub` | Verejny importovany zaznam bez kompletnej clenskej identity |
 | `title_prefix` | Titul pred menom |
 | `title_suffix` | Titul za menom |
 | `street`, `city`, `zip_code`, `country` | Adresa |
@@ -391,7 +393,7 @@ V kode sa status pouziva na ikony, filtrovanie a eCP payload. Status nie je zati
 
 Dolezite pravidla:
 
-- `birth_date_encrypted` je povinne pole.
+- `birth_date_encrypted` uz nie je povinne pole, pretoze verejny SSS adresar poskytuje predsedov bez datumu narodenia. Pre realneho clena a eCP vydanie ma byt doplneny.
 - `ecp_hash` ma unikatny index.
 - eCP vazba nie je cez `member_id` v eCP tabulke, ale cez hash.
 - Email ma default prazdny string, nie `NULL`; to ma dopad na buduce unikatne constrainty.
@@ -412,6 +414,7 @@ Ucel:
 - kontakt a adresu,
 - predsedu,
 - datum zalozenia,
+- web stranku,
 - URL loga.
 
 Najdolezitejsie polia:
@@ -420,9 +423,11 @@ Najdolezitejsie polia:
 | --- | --- |
 | `club_id` | Primarny kluc klubu |
 | `club_name` | Nazov klubu |
-| `phone` | Telefon |
-| `email` | Email klubu |
+| `phone` | Telefon alebo viac telefonov oddelenych ciarkou |
+| `email` | Email alebo viac emailov oddelenych ciarkou |
+| `webpage` | Web stranka alebo viac verejnych odkazov oddelenych ciarkou |
 | `president_id` | Odkaz na clena, ktory je predseda |
+| `president_name_text` | Verejne textove meno predsedu z importu/adresara, kym nie je prepojene na clena |
 | `foundation_date` | Datum zalozenia |
 | `logo_url` | Verejne URL loga v GCS |
 | `street`, `city`, `zip_code`, `country` | Adresa |
@@ -430,6 +435,7 @@ Najdolezitejsie polia:
 Vztahy:
 
 - `president_id` odkazuje na `members.member_id`.
+- `president_name_text` uchovava povodne verejne meno predsedu z adresara. Import zaroven vytvori alebo najde clena a nastavi `president_id`.
 - Pri zmazani clena sa prezident nastavi na `NULL`.
 - Clenovia klubu sa neukladaju v tejto tabulke, ale cez `club_affiliations`.
 
@@ -446,6 +452,7 @@ Ucel:
 
 - umoznit, aby clen patril do viacerych klubov,
 - rozlisit primarny klub clena,
+- ulozit klubovu rolu clena,
 - podporit zobrazenie hosta v inom klube.
 
 Polia:
@@ -455,6 +462,7 @@ Polia:
 | `member_id` | Odkaz na clena |
 | `club_id` | Odkaz na klub |
 | `is_primary_club` | Ci je klub primarny pre clena |
+| `role` | Klubova rola; aktualne `member` alebo `president` |
 
 Primarny kluc je dvojica `member_id`, `club_id`.
 
@@ -468,6 +476,7 @@ Dolezita medzera:
 - Schema uz vynucuje, ze clen ma najviac jeden primarny klub.
 - Kod pri zmene primarneho klubu vypne ostatne primarne afiliacie toho clena.
 - Vlozenie existujucej dvojice clen/klub je idempotentne cez `ON CONFLICT`.
+- Import verejneho SSS adresara nastavuje predsedu ako primarneho clena klubu s rolou `president` a zaroven aktualizuje `clubs.president_id`.
 
 ### membership_fees
 

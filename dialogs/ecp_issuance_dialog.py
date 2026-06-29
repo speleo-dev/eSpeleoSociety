@@ -10,8 +10,8 @@ from model import Ecp, Member # Import Member model
 import db
 from config import secret_manager
 from email_notifications import EmailNotificationError, send_ecp_issued_email
-from ecp_issuance import EcpQrUploadError, EcpSigningConfigError, issue_and_upload_signed_ecp_qr
-from utils import get_icon, upload_photo_to_bucket, upload_to_bucket, show_error_message, show_warning_message
+from ecp_issuance import EcpQrUploadError, EcpSigningConfigError, issue_and_upload_ecp_delivery_bundle
+from utils import get_icon, load_image_from_url, upload_photo_to_bucket, upload_to_bucket, show_error_message, show_warning_message
 import utils # Pre prístup k utils.create_check_hash
 
 class ECPIssuanceDialog(QDialog):
@@ -50,6 +50,10 @@ class ECPIssuanceDialog(QDialog):
         self.photo_viewer.setScaledContents(True) # To scale the image to QLabel size
         self.photo_viewer.setPixmap(QPixmap()) # Initialize with an empty pixmap to prevent NoneType error
         layout.addWidget(self.photo_viewer)
+        if getattr(self.member, "portrait_url", None):
+            portrait_pixmap = load_image_from_url(self.member.portrait_url, max_size=(225, 300))
+            if portrait_pixmap:
+                self.photo_viewer.setPixmap(portrait_pixmap)
 
         # Checkboxy pre eCP options
         self.chk_gdpr_consent = QCheckBox(self.tr("GDPR Consent for eCP"))
@@ -138,24 +142,28 @@ class ECPIssuanceDialog(QDialog):
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
         visible_pixmap.save(buffer, "PNG")
-        image_data = buffer.data()
+        image_data = bytes(buffer.data())
         buffer.close()
         photo_hash_val = hashlib.sha256(uuid.uuid4().bytes).hexdigest() # Renamed for clarity
         new_ecp_hash = secrets.token_hex(32)
+        bucket_name = secret_manager.get_secret("bucket_name")
+        ecp_photo_url = f"https://storage.googleapis.com/{bucket_name}/{photo_hash_val}.png" if bucket_name else getattr(self.member, "portrait_url", None)
         try:
             primary_club = db.db_manager.fetch_club_by_id(self.member.primary_club_id) if self.member.primary_club_id else None
-            issued_qr, qr_url = issue_and_upload_signed_ecp_qr(
+            upload_photo_to_bucket(photo_hash_val, image_data)
+            delivery_bundle = issue_and_upload_ecp_delivery_bundle(
                 member=self.member,
                 club=primary_club,
                 ecp_hash=new_ecp_hash,
                 get_secret=secret_manager.get_secret,
                 upload_blob=upload_to_bucket,
+                portrait_image=image_data,
+                portrait_url=ecp_photo_url,
             )
         except (EcpSigningConfigError, EcpQrUploadError, ValueError, TypeError) as exc:
             show_error_message(self.tr(f"Cannot issue signed eCP QR: {exc}"))
             return
 
-        upload_photo_to_bucket(photo_hash_val, image_data)
         self.member.ecp_hash = new_ecp_hash # Assuming translated attribute
         check_hash_val = utils.create_check_hash()
         # Assuming Ecp constructor uses translated attribute names
@@ -169,17 +177,31 @@ class ECPIssuanceDialog(QDialog):
         db.db_manager.update_ecp_record_issuance(
             ecp_record_id=ecp_record_id,
             ecp_hash=self.member.ecp_hash,
-            qr_url=qr_url,
-            qr_key_id=issued_qr.key_id,
-            qr_payload=issued_qr.payload,
-            qr_payload_hash=issued_qr.payload_hash,
-            issued_at=issued_qr.issued_at,
-            valid_until=issued_qr.valid_until,
+            qr_url=delivery_bundle.qr_url,
+            qr_key_id=delivery_bundle.issued_qr.key_id,
+            qr_payload=delivery_bundle.issued_qr.payload,
+            qr_payload_hash=delivery_bundle.issued_qr.payload_hash,
+            issued_at=delivery_bundle.issued_qr.issued_at,
+            valid_until=delivery_bundle.issued_qr.valid_until,
+            verification_url=delivery_bundle.verification_url,
+            card_image_url=delivery_bundle.card_image_url,
+            card_pdf_url=delivery_bundle.card_pdf_url,
+            legal_document_url=delivery_bundle.legal_document_url,
         )
         db.db_manager.update_member_ecp_hash(self.member.member_id, self.member.ecp_hash)
         email_warning = None
         try:
-            send_ecp_issued_email(self.member, issued_qr, secret_manager.get_secret)
+            send_ecp_issued_email(
+                self.member,
+                delivery_bundle.issued_qr,
+                secret_manager.get_secret,
+                verification_url=delivery_bundle.verification_url,
+                card_image=delivery_bundle.card_image,
+                card_pdf=delivery_bundle.card_pdf,
+                card_image_url=delivery_bundle.card_image_url,
+                card_pdf_url=delivery_bundle.card_pdf_url,
+                legal_document_url=delivery_bundle.legal_document_url,
+            )
         except EmailNotificationError as exc:
             email_warning = self.tr(f"eCP was issued, but email notification failed: {exc}")
         if email_warning:

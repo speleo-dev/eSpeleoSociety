@@ -4,10 +4,13 @@ from datetime import date, datetime
 import hashlib
 from io import BytesIO
 import json
+import secrets
 from typing import Callable
 
 import qrcode
 
+from ecp_card import build_ecp_card_assets, build_verification_page_html, public_gcs_url
+from ecp_documents import DEFAULT_LEGAL_DOCUMENT_URL, default_legal_documents
 from ecp_qr import create_ecp_claim, sign_ecp_claim
 
 
@@ -35,6 +38,23 @@ class IssuedSignedEcpQr:
     key_id: str
     issued_at: datetime
     valid_until: date
+    verification_url: str | None = None
+    legal_documents: list[dict] | None = None
+
+
+@dataclass(frozen=True)
+class IssuedEcpDeliveryBundle:
+    issued_qr: IssuedSignedEcpQr
+    qr_url: str
+    verification_url: str
+    verification_blob_name: str
+    card_image: bytes
+    card_pdf: bytes
+    card_image_url: str
+    card_pdf_url: str
+    card_image_blob_name: str
+    card_pdf_blob_name: str
+    legal_document_url: str
 
 
 def _normalise_pem(value: str) -> str:
@@ -101,6 +121,8 @@ def issue_signed_ecp_qr(
     paid_year: int | None = None,
     issued_at: datetime | None = None,
     ecp_hash: str | None = None,
+    verification_url: str | None = None,
+    legal_documents: list[dict] | None = None,
 ) -> IssuedSignedEcpQr:
     if issued_at is None:
         issued_at = datetime.now().astimezone()
@@ -112,6 +134,8 @@ def issue_signed_ecp_qr(
         valid_until=valid_until,
         paid_year=paid_year,
         issued_at=issued_at,
+        verification_url=verification_url,
+        legal_documents=legal_documents,
     )
     payload = sign_ecp_claim(claim, private_key_pem, key_id=key_id)
     qr_data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -125,6 +149,8 @@ def issue_signed_ecp_qr(
         key_id=key_id,
         issued_at=issued_at,
         valid_until=valid_until,
+        verification_url=verification_url,
+        legal_documents=legal_documents,
     )
 
 
@@ -158,3 +184,105 @@ def issue_and_upload_signed_ecp_qr(
     if not qr_url:
         raise EcpQrUploadError("Signed eCP QR upload failed.")
     return issued_qr, qr_url
+
+
+def _verification_blob_name(ecp_hash: str, token: str | None = None) -> str:
+    token = token or secrets.token_urlsafe(24)
+    return f"ecp_verify/{token}.html"
+
+
+def issue_and_upload_ecp_delivery_bundle(
+    member,
+    club,
+    ecp_hash: str,
+    get_secret: Callable[[str], str | None],
+    upload_blob: Callable[[str, bytes, str], str | None],
+    valid_until: date | None = None,
+    paid_year: int | None = None,
+    issued_at: datetime | None = None,
+    portrait_image: bytes | None = None,
+    portrait_url: str | None = None,
+    legal_document_url: str = DEFAULT_LEGAL_DOCUMENT_URL,
+) -> IssuedEcpDeliveryBundle:
+    bucket_name = get_secret("bucket_name")
+    if not bucket_name:
+        raise EcpSigningConfigError("Missing bucket_name secret for eCP verification page URL.")
+
+    verification_blob_name = _verification_blob_name(ecp_hash)
+    verification_url = public_gcs_url(bucket_name, verification_blob_name)
+    legal_documents = default_legal_documents()
+    if legal_document_url != DEFAULT_LEGAL_DOCUMENT_URL:
+        legal_documents = [{
+            "name": "Vseobecna vynimka pre pohyb mimo vyznacenych chodnikov",
+            "url": legal_document_url,
+        }]
+
+    signing_config = load_ecp_signing_config(get_secret)
+    if valid_until is None:
+        valid_until = calculate_ecp_valid_until(issued_at)
+    if paid_year is None:
+        paid_year = valid_until.year
+
+    issued_qr = issue_signed_ecp_qr(
+        member=member,
+        club=club,
+        valid_until=valid_until,
+        private_key_pem=signing_config.private_key_pem,
+        key_id=signing_config.key_id,
+        paid_year=paid_year,
+        issued_at=issued_at,
+        ecp_hash=ecp_hash,
+        verification_url=verification_url,
+        legal_documents=legal_documents,
+    )
+
+    qr_url = upload_blob(issued_qr.blob_name, issued_qr.qr_png, "image/png")
+    if not qr_url:
+        raise EcpQrUploadError("Signed eCP QR upload failed.")
+
+    card_image, card_pdf = build_ecp_card_assets(
+        member=member,
+        club=club,
+        issued_qr=issued_qr,
+        portrait_image=portrait_image,
+    )
+    card_image_blob_name = f"ecp_cards/{ecp_hash}.jpg"
+    card_pdf_blob_name = f"ecp_cards/{ecp_hash}.pdf"
+    card_image_url = upload_blob(card_image_blob_name, card_image, "image/jpeg")
+    if not card_image_url:
+        raise EcpQrUploadError("eCP card JPG upload failed.")
+    card_pdf_url = upload_blob(card_pdf_blob_name, card_pdf, "application/pdf")
+    if not card_pdf_url:
+        raise EcpQrUploadError("eCP card PDF upload failed.")
+
+    verification_html = build_verification_page_html(
+        member=member,
+        club=club,
+        issued_qr=issued_qr,
+        qr_url=qr_url,
+        card_image_url=card_image_url,
+        card_pdf_url=card_pdf_url,
+        portrait_url=portrait_url,
+        legal_document_url=legal_document_url,
+    )
+    uploaded_verification_url = upload_blob(
+        verification_blob_name,
+        verification_html,
+        "text/html; charset=utf-8",
+    )
+    if not uploaded_verification_url:
+        raise EcpQrUploadError("eCP verification page upload failed.")
+
+    return IssuedEcpDeliveryBundle(
+        issued_qr=issued_qr,
+        qr_url=qr_url,
+        verification_url=verification_url,
+        verification_blob_name=verification_blob_name,
+        card_image=card_image,
+        card_pdf=card_pdf,
+        card_image_url=card_image_url,
+        card_pdf_url=card_pdf_url,
+        card_image_blob_name=card_image_blob_name,
+        card_pdf_blob_name=card_pdf_blob_name,
+        legal_document_url=legal_document_url,
+    )

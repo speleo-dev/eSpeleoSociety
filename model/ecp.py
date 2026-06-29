@@ -18,7 +18,11 @@ class Ecp:
                  valid_until=None,
                  wallet_status: Optional[str] = None,
                  wallet_object_id: Optional[str] = None,
-                 wallet_last_error: Optional[str] = None):
+                 wallet_last_error: Optional[str] = None,
+                 verification_url: Optional[str] = None,
+                 card_image_url: Optional[str] = None,
+                 card_pdf_url: Optional[str] = None,
+                 legal_document_url: Optional[str] = None):
         self.ecp_id = ecp_id
         self.ecp_hash = ecp_hash
         self.gdpr_consent = gdpr_consent
@@ -34,6 +38,10 @@ class Ecp:
         self.wallet_status = wallet_status
         self.wallet_object_id = wallet_object_id
         self.wallet_last_error = wallet_last_error
+        self.verification_url = verification_url
+        self.card_image_url = card_image_url
+        self.card_pdf_url = card_pdf_url
+        self.legal_document_url = legal_document_url
         if check_hash and verify_check_hash(check_hash):
             self.check_hash = check_hash
         else:

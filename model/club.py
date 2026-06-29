@@ -14,7 +14,9 @@ class Club:
                  president_name: str,
                  foundation_date: date,
                  member_count: int,
-                 logo_url: str = None):
+                 logo_url: str = None,
+                 webpage: str = "",
+                 president_name_text: str = ""):
         self.club_id = club_id
         self.name = name
         self.street = street
@@ -28,6 +30,8 @@ class Club:
         self.foundation_date = foundation_date
         self.member_count = member_count
         self.logo_url = logo_url
+        self.webpage = webpage or ""
+        self.president_name_text = president_name_text or ""
 
     def __repr__(self):
         return f"<Club id={self.club_id} name={self.name}>"

@@ -3,13 +3,17 @@ import os, copy, datetime
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QFormLayout,
     QComboBox, QCheckBox, QListWidget, QListWidgetItem, QPushButton,
-    QMessageBox, QInputDialog, QDateEdit
+    QMessageBox, QInputDialog, QDateEdit, QFileDialog
 )
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QPixmap, QIcon
 import db
+from face_detection import prepare_portrait_upload
 from model import Club, Member
-from utils import get_state_pixmap,get_icon, show_warning_message, show_info_message, show_success_message, show_error_message
+from utils import (
+    get_state_pixmap, get_icon, load_image_from_url, show_warning_message,
+    show_info_message, show_success_message, show_error_message, upload_to_bucket
+)
 import utils # Zmenený import
 
 class MemberManagementDialog(QDialog):
@@ -45,6 +49,7 @@ class MemberManagementDialog(QDialog):
         self.original_member = copy.deepcopy(self.member) if self.member else None
         self.is_new = is_new
         self.edit_mode = False
+        self.pending_portrait_result = None
         self.init_ui()
 
     def init_ui(self):
@@ -96,6 +101,24 @@ class MemberManagementDialog(QDialog):
         form_layout.addRow(self.tr("Country:"), self.cb_country)
         form_layout.addRow(self.tr("Phone:"), self.le_phone)
         form_layout.addRow(self.tr("Email:"), self.le_email)
+
+        portrait_layout = QHBoxLayout()
+        self.portrait_preview = QLabel(self.tr("No Portrait"))
+        self.portrait_preview.setFixedSize(90, 120)
+        self.portrait_preview.setAlignment(Qt.AlignCenter)
+        self.portrait_preview.setScaledContents(True)
+        self.portrait_preview.setStyleSheet("border: 1px solid #999; background-color: #F4F4F4;")
+        portrait_layout.addWidget(self.portrait_preview)
+        portrait_controls = QVBoxLayout()
+        self.btn_load_portrait = QPushButton(self.tr("Load Portrait Photo"))
+        self.btn_load_portrait.clicked.connect(self.load_portrait_photo)
+        portrait_controls.addWidget(self.btn_load_portrait)
+        self.lbl_portrait_status = QLabel("")
+        self.lbl_portrait_status.setWordWrap(True)
+        portrait_controls.addWidget(self.lbl_portrait_status)
+        portrait_layout.addLayout(portrait_controls)
+        form_layout.addRow(self.tr("Portrait Photo:"), portrait_layout)
+        self.load_existing_portrait_preview()
 
         self.cb_status = QComboBox()
         # This order will be reflected in the ComboBox dropdown.
@@ -266,6 +289,7 @@ class MemberManagementDialog(QDialog):
         self.chk_fee_paid.setEnabled(False)
         self.chk_discounted.setEnabled(False)
         self.chk_is_president.setEnabled(False)
+        self.btn_load_portrait.setEnabled(False)
         self.btn_edit.setVisible(True)
         self.btn_save.setVisible(False)
         self.edit_mode = False
@@ -300,7 +324,54 @@ class MemberManagementDialog(QDialog):
         self.chk_fee_paid.setEnabled(True)
         self.chk_discounted.setEnabled(True)
         self.chk_is_president.setEnabled(False)
+        self.btn_load_portrait.setEnabled(True)
         self.edit_mode = True
+
+    def load_existing_portrait_preview(self):
+        portrait_url = getattr(self.member, "portrait_url", None)
+        if not portrait_url:
+            self.lbl_portrait_status.setText(self.tr("No portrait photo saved."))
+            return
+        pixmap = load_image_from_url(portrait_url, max_size=(90, 120))
+        if pixmap:
+            self.portrait_preview.setPixmap(pixmap)
+            self.portrait_preview.setText("")
+            face_text = self.tr("face detected") if getattr(self.member, "portrait_face_detected", False) else self.tr("face not confirmed")
+            self.lbl_portrait_status.setText(self.tr("Saved portrait loaded; ") + face_text)
+        else:
+            self.lbl_portrait_status.setText(self.tr("Saved portrait URL exists, but image could not be loaded."))
+
+    def load_portrait_photo(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Select Portrait Photo"),
+            "",
+            self.tr("Images (*.png *.jpg *.jpeg)"),
+        )
+        if not filename:
+            return
+
+        result = prepare_portrait_upload(filename)
+        if not result.is_usable:
+            show_warning_message(result.message)
+            return
+
+        if not result.face_detected:
+            reply = QMessageBox.question(
+                self,
+                self.tr("Face Detection"),
+                self.tr(result.message + "\nDo you want to use this portrait anyway?"),
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        pixmap = QPixmap()
+        pixmap.loadFromData(result.image_bytes)
+        self.portrait_preview.setPixmap(pixmap)
+        self.portrait_preview.setText("")
+        self.lbl_portrait_status.setText(result.message)
+        self.pending_portrait_result = result
 
     def toggle_edit_mode(self):
         if not self.edit_mode:
@@ -320,7 +391,15 @@ class MemberManagementDialog(QDialog):
         self.member.title_suffix = self.le_title_suffix.text()
         # Convert QDate to Python date object for the model
         q_date = self.de_birth_date.date()
-        self.member.birth_date = datetime.date(q_date.year(), q_date.month(), q_date.day()) if q_date.isValid() else None
+        if (
+            self.member.is_directory_stub
+            and self.original_member
+            and self.original_member.birth_date is None
+            and q_date == QDate.currentDate()
+        ):
+            self.member.birth_date = None
+        else:
+            self.member.birth_date = datetime.date(q_date.year(), q_date.month(), q_date.day()) if q_date.isValid() else None
         self.member.street = self.le_street.text()
         self.member.city = self.le_city.text()
         self.member.zip_code = self.le_zip_code.text()
@@ -345,6 +424,27 @@ class MemberManagementDialog(QDialog):
         if self.chk_fee_paid.isChecked():
             # Use set_paid_fee which handles logic and DB insert
             self.member.set_paid_fee(year=datetime.datetime.now().year)
+
+        if self.pending_portrait_result:
+            blob_name = f"member_portraits/{self.member.member_id}-{self.pending_portrait_result.image_hash[:16]}.jpg"
+            portrait_url = upload_to_bucket(
+                blob_name,
+                self.pending_portrait_result.image_bytes,
+                self.pending_portrait_result.content_type,
+            )
+            if portrait_url:
+                db.db_manager.update_member_portrait(
+                    member_id=self.member.member_id,
+                    portrait_url=portrait_url,
+                    portrait_hash=self.pending_portrait_result.image_hash,
+                    face_detected=self.pending_portrait_result.face_detected,
+                )
+                self.member.portrait_url = portrait_url
+                self.member.portrait_hash = self.pending_portrait_result.image_hash
+                self.member.portrait_face_detected = self.pending_portrait_result.face_detected
+                self.pending_portrait_result = None
+            else:
+                show_warning_message(self.tr("Member was saved, but portrait upload failed."))
         
         self.original_member = copy.deepcopy(self.member) # Update original with new state
         show_success_message(self.tr("Changes have been saved."))

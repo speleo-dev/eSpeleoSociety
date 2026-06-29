@@ -82,6 +82,40 @@ class EmailNotificationsTest(unittest.TestCase):
         self.assertIn("Ada Lovelace", body)
         self.assertIn("2027-06-28", body)
 
+    def test_build_ecp_issued_message_can_attach_card_assets_and_links(self):
+        config = load_smtp_config({
+            "smtp_server": "smtp.example.org",
+            "smtp_port": "587",
+            "smtp_user": "issuer@example.org",
+            "smtp_password": "secret",
+        }.get)
+        member = SimpleNamespace(
+            title_prefix="",
+            first_name="Ada",
+            last_name="Lovelace",
+            title_suffix="",
+            email="ada@example.org",
+        )
+        issued_qr = SimpleNamespace(valid_until=date(2027, 6, 28))
+
+        message = build_ecp_issued_message(
+            config,
+            member,
+            issued_qr,
+            verification_url="https://storage.example/ecp_verify/random-token.html",
+            card_image=b"\xff\xd8fake-jpeg",
+            card_pdf=b"%PDF-fake",
+        )
+
+        self.assertTrue(message.is_multipart())
+        body = message.get_body(preferencelist=("plain",)).get_content()
+        self.assertIn("https://storage.example/ecp_verify/random-token.html", body)
+        self.assertIn("vynimka.pdf", body)
+        attachments = list(message.iter_attachments())
+        self.assertEqual(len(attachments), 2)
+        self.assertEqual(attachments[0].get_filename(), "ecp-preukaz.jpg")
+        self.assertEqual(attachments[1].get_filename(), "ecp-preukaz.pdf")
+
     def test_send_ecp_issued_email_uses_starttls_and_authenticates(self):
         member = SimpleNamespace(
             title_prefix="",

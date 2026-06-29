@@ -7,3 +7,8 @@ temp.properties
 .env
 .env.*
 docs/projekt/
+
+# Local agent/runtime artifacts
+/codex-session
+/os
+/sys
