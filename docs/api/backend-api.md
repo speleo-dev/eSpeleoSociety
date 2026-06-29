@@ -169,6 +169,7 @@ Rules:
 - `contentType` must be `image/jpeg` or `image/png`.
 - `gdprConsent` must be explicitly `true`.
 - `notificationsEnabled` defaults to `true`.
+- if the member already has a pending eCP request, the API returns `409 ecp_request_already_pending` and does not upload a new photo.
 
 Response `201`:
 
@@ -184,7 +185,7 @@ Response `201`:
 }
 ```
 
-Validation errors use `422` with stable codes such as `invalid_request_body`, `photo_required`, `invalid_photo_base64`, `photo_too_large`, `unsupported_photo_content_type`, and `gdpr_consent_required`.
+Validation errors use `422` with stable codes such as `invalid_request_body`, `photo_required`, `invalid_photo_base64`, `photo_too_large`, `unsupported_photo_content_type`, and `gdpr_consent_required`. Duplicate pending requests use `409 ecp_request_already_pending`.
 
 ### `GET /api/v1/ecp/verify/{token}`
 
@@ -275,5 +276,5 @@ Authorization: Bearer <jwt>
 1. Add SQL-level pagination and search for club members.
 2. Add a dedicated API audit table and rate limiting.
 3. Add eCP revocation/renewal endpoints behind `admin`.
-4. Add idempotency keys and duplicate-pending-request protection for `POST /api/v1/me/ecp-requests`.
+4. Add idempotency keys for `POST /api/v1/me/ecp-requests`.
 5. Replace HS256 development JWT validation with OIDC discovery and JWKS.

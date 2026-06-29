@@ -7,6 +7,7 @@ import uuid
 from backend.audit import AuditEvent
 from backend.auth import AuthError, authenticate_bearer, require_any_role
 from backend.pagination import paginate_items, parse_limit
+from backend.repository import DuplicatePendingEcpRequestError
 from backend.serializers import club_to_api, ecp_verification_to_api, member_profile_to_api, member_to_api
 
 
@@ -193,13 +194,21 @@ class ApiApp:
             return error_response(422, "unsupported_photo_content_type", "Photo content type must be image/jpeg or image/png.", request_id)
         if payload.get("gdprConsent") is not True:
             return error_response(422, "gdpr_consent_required", "gdprConsent must be true to request eCP.", request_id)
-        request = self.repository.create_member_ecp_request(
-            member_id=context.member_id,
-            photo_bytes=photo_bytes,
-            content_type=content_type,
-            gdpr_consent=True,
-            notifications_enabled=bool(payload.get("notificationsEnabled", True)),
-        )
+        try:
+            request = self.repository.create_member_ecp_request(
+                member_id=context.member_id,
+                photo_bytes=photo_bytes,
+                content_type=content_type,
+                gdpr_consent=True,
+                notifications_enabled=bool(payload.get("notificationsEnabled", True)),
+            )
+        except DuplicatePendingEcpRequestError:
+            return error_response(
+                409,
+                "ecp_request_already_pending",
+                "Member already has a pending eCP request.",
+                request_id,
+            )
         return json_response(
             201,
             {

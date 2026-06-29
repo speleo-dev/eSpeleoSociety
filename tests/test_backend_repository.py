@@ -2,13 +2,14 @@ from datetime import date
 import unittest
 
 from backend.audit import AuditEvent
-from backend.repository import DatabaseApiRepository
+from backend.repository import DatabaseApiRepository, DuplicatePendingEcpRequestError
 
 
 class FakeDbManager:
-    def __init__(self, row=None, rows=None):
+    def __init__(self, row=None, rows=None, fetch_one_rows=None):
         self.row = row
         self.rows = rows or []
+        self.fetch_one_rows = list(fetch_one_rows or [])
         self.last_query = None
         self.last_params = None
         self.fetch_one_calls = []
@@ -23,6 +24,8 @@ class FakeDbManager:
         self.last_query = query
         self.last_params = params
         self.fetch_one_calls.append((query, params))
+        if self.fetch_one_rows:
+            return self.fetch_one_rows.pop(0)
         return self.row
 
     def _log_action(self, action, table_name, details, user=None):
@@ -160,7 +163,11 @@ class BackendRepositoryTest(unittest.TestCase):
             uploads.append((blob_name, data, content_type))
             return f"https://storage.example/{blob_name}"
 
-        fake_db = FakeDbManager(row={"ecp_record_id": 88, "request_id": 77, "request_date": date(2026, 6, 29)})
+        fake_db = FakeDbManager(fetch_one_rows=[
+            None,
+            {"ecp_record_id": 88},
+            {"request_id": 77, "request_date": date(2026, 6, 29)},
+        ])
         repository = DatabaseApiRepository(fake_db, upload_blob=upload_blob, check_hash_factory=lambda: "check-1")
 
         request = repository.create_member_ecp_request(
@@ -178,9 +185,34 @@ class BackendRepositoryTest(unittest.TestCase):
         self.assertEqual(uploads[0][1:], (b"portrait", "image/jpeg"))
         self.assertTrue(uploads[0][0].startswith("ecp_request_photos/"))
         self.assertTrue(uploads[0][0].endswith(".jpg"))
-        self.assertIn("INSERT INTO ecp_records", fake_db.fetch_one_calls[0][0])
-        self.assertIn("INSERT INTO ecp_requests", fake_db.fetch_one_calls[1][0])
-        self.assertNotIn("photo_hash", fake_db.fetch_one_calls[1][0])
+        self.assertIn("SELECT request_id", fake_db.fetch_one_calls[0][0])
+        self.assertIn("status = 'pending'", fake_db.fetch_one_calls[0][0])
+        self.assertIn("INSERT INTO ecp_records", fake_db.fetch_one_calls[1][0])
+        self.assertIn("INSERT INTO ecp_requests", fake_db.fetch_one_calls[2][0])
+        self.assertNotIn("photo_hash", fake_db.fetch_one_calls[2][0])
+
+    def test_create_member_ecp_request_rejects_existing_pending_before_upload(self):
+        uploads = []
+
+        def upload_blob(blob_name, data, content_type):
+            uploads.append((blob_name, data, content_type))
+            return f"https://storage.example/{blob_name}"
+
+        fake_db = FakeDbManager(fetch_one_rows=[{"request_id": 55}])
+        repository = DatabaseApiRepository(fake_db, upload_blob=upload_blob, check_hash_factory=lambda: "check-1")
+
+        with self.assertRaises(DuplicatePendingEcpRequestError) as raised:
+            repository.create_member_ecp_request(
+                member_id=101,
+                photo_bytes=b"portrait",
+                content_type="image/jpeg",
+                gdpr_consent=True,
+            )
+
+        self.assertEqual(raised.exception.request_id, 55)
+        self.assertEqual(uploads, [])
+        self.assertEqual(len(fake_db.fetch_one_calls), 1)
+        self.assertIn("SELECT request_id", fake_db.fetch_one_calls[0][0])
 
     def test_record_api_audit_event_uses_db_log_without_raw_tokens(self):
         fake_db = FakeDbManager()

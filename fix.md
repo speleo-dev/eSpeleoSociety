@@ -365,6 +365,10 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - `photo_too_large`,
   - `unsupported_photo_content_type`,
   - `gdpr_consent_required`.
+- Added duplicate pending request protection:
+  - repository checks for an existing `ecp_requests.status = 'pending'` row for the member before upload,
+  - API returns `409 ecp_request_already_pending`,
+  - no new photo is uploaded for duplicates.
 - Decoded photo data is capped at 5 MB.
 - Added `DatabaseApiRepository.create_member_ecp_request()`:
   - generates a request photo hash,
@@ -386,5 +390,4 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - WSGI request body forwarding.
 - Remaining hardening:
   - add idempotency keys,
-  - prevent duplicate pending eCP requests per member,
   - add production-grade image inspection/face validation in the backend upload path.

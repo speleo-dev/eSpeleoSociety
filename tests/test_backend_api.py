@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import jwt
 
 from backend.app import ApiApp
+from backend.repository import DuplicatePendingEcpRequestError
 
 
 class EmptyRepository:
@@ -18,6 +19,7 @@ class ClubRepository:
         self.list_calls = []
         self.profile_calls = []
         self.created_ecp_requests = []
+        self.reject_duplicate_ecp_request = False
         self.clubs = [
             SimpleNamespace(
                 club_id=1,
@@ -137,6 +139,8 @@ class ClubRepository:
         return self.member_profiles.get(member_id)
 
     def create_member_ecp_request(self, member_id: int, photo_bytes: bytes, content_type: str, gdpr_consent=True, notifications_enabled=True):
+        if self.reject_duplicate_ecp_request:
+            raise DuplicatePendingEcpRequestError(55)
         request = {
             "request_id": 77,
             "member_id": member_id,
@@ -383,6 +387,28 @@ class BackendApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(json.loads(response.body)["error"]["code"], "photo_too_large")
+
+    def test_ecp_request_rejects_duplicate_pending_request(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="member-101", roles=["member"], member_id=101)
+        repository = ClubRepository()
+        repository.reject_duplicate_ecp_request = True
+        app = ApiApp(repository=repository, jwt_secret=secret)
+
+        response = app.handle_request(
+            "POST",
+            "/api/v1/me/ecp-requests",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({
+                "photoBase64": "cG9ydHJhaXQ=",
+                "contentType": "image/jpeg",
+                "gdprConsent": True,
+            }),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "ecp_request_already_pending")
+        self.assertEqual(repository.created_ecp_requests, [])
 
     def test_ecp_verify_token_returns_public_detail_without_contact_data(self):
         audit_sink = AuditSink()

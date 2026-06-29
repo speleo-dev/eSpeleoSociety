@@ -127,6 +127,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
   /ecp/verify/{token}:
@@ -196,6 +198,12 @@ components:
             $ref: "#/components/schemas/ErrorEnvelope"
     Forbidden:
       description: Authenticated caller is not allowed to access the resource.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Request conflicts with current member state.
       content:
         application/json:
           schema:

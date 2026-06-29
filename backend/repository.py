@@ -10,6 +10,12 @@ from backend.pagination import decode_id_cursor, encode_id_cursor
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{12,256}(?:\.html)?$")
 
 
+class DuplicatePendingEcpRequestError(Exception):
+    def __init__(self, request_id):
+        super().__init__("Member already has a pending eCP request.")
+        self.request_id = request_id
+
+
 @dataclass(frozen=True)
 class ClubRecord:
     club_id: int
@@ -157,6 +163,19 @@ class DatabaseApiRepository:
         gdpr_consent=True,
         notifications_enabled=True,
     ):
+        pending_row = self.db_manager._fetch_one(
+            """
+            SELECT request_id
+            FROM ecp_requests
+            WHERE member_id = %s AND status = 'pending'
+            ORDER BY request_date DESC, request_id DESC
+            LIMIT 1;
+            """,
+            (member_id,),
+        )
+        if pending_row:
+            request_id = pending_row["request_id"] if isinstance(pending_row, dict) else pending_row[0]
+            raise DuplicatePendingEcpRequestError(request_id)
         if not self.upload_blob:
             raise RuntimeError("Photo upload backend is not configured.")
         extension = ".png" if content_type == "image/png" else ".jpg"
