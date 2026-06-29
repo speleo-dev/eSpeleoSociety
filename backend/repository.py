@@ -1,10 +1,11 @@
 from dataclasses import dataclass
+from datetime import date
 import json
 import re
 import secrets
 
 from backend.audit import AuditEvent
-from backend.pagination import decode_id_cursor, encode_id_cursor
+from backend.pagination import decode_id_cursor, decode_keyset_cursor, encode_id_cursor, encode_keyset_cursor
 
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{12,256}(?:\.html)?$")
@@ -33,6 +34,23 @@ class ClubRecord:
     logo_url: str | None = None
     webpage: str = ""
     president_name_text: str = ""
+
+
+@dataclass(frozen=True)
+class MemberRecord:
+    member_id: int
+    status: str
+    title_prefix: str
+    first_name: str
+    last_name: str
+    title_suffix: str
+    phone: str
+    email: str
+    ecp_hash: str | None
+    primary_club_id: int | None
+    is_president: bool
+    has_paid_current_year_fee: bool = False
+    is_directory_stub: bool = False
 
 
 class DatabaseApiRepository:

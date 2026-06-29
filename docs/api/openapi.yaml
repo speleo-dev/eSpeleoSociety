@@ -67,6 +67,7 @@ paths:
             type: integer
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/MemberFilter"
       responses:
         "200":
           description: Paginated club members.
@@ -183,6 +184,14 @@ components:
         type: string
         maxLength: 100
       description: Case-insensitive search over club name, city, email, phone, webpage, and public president text.
+    MemberFilter:
+      name: filter
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 100
+      description: Case-insensitive search over display name, email, phone, member status, and club role.
   responses:
     BadRequest:
       description: Request body is malformed.

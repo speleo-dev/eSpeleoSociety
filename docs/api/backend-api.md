@@ -264,7 +264,7 @@ Authorization: Bearer <jwt>
 ## Known Limitations
 
 - The API still uses the existing PostgreSQL schema and DB manager.
-- `GET /api/v1/clubs` has SQL-level filtering and keyset pagination; `GET /api/v1/clubs/{club_id}/members` still uses the desktop DB manager path before API-level pagination.
+- `GET /api/v1/clubs` and `GET /api/v1/clubs/{club_id}/members` have SQL-level filtering and keyset pagination.
 - JWT validation is development-only HS256. Production should use OIDC/JWKS.
 - The first member write endpoint exists for eCP requests; admin write endpoints are still not implemented.
 - No refresh tokens, login UI, or portal session handling exists yet.
@@ -273,8 +273,8 @@ Authorization: Bearer <jwt>
 
 ## Next Backend Slices
 
-1. Add SQL-level pagination and search for club members.
-2. Add a dedicated API audit table and rate limiting.
+1. Add a dedicated API audit table and rate limiting.
+2. Add portal-member endpoint for "my profile" and "request eCP".
 3. Add eCP revocation/renewal endpoints behind `admin`.
 4. Add idempotency keys for `POST /api/v1/me/ecp-requests`.
 5. Replace HS256 development JWT validation with OIDC discovery and JWKS.

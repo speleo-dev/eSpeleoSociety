@@ -50,6 +50,24 @@ def decode_id_cursor(cursor: str | None) -> int:
         return 0
 
 
+def encode_keyset_cursor(values: dict) -> str:
+    payload = json.dumps({"keyset": values}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def decode_keyset_cursor(cursor: str | None) -> dict:
+    if not cursor:
+        return {}
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        payload = base64.urlsafe_b64decode((cursor + padding).encode("ascii"))
+        decoded = json.loads(payload.decode("utf-8"))
+        keyset = decoded.get("keyset", {})
+        return keyset if isinstance(keyset, dict) else {}
+    except Exception:
+        return {}
+
+
 def paginate_items(items: list, limit: int, cursor: str | None) -> tuple[list, str | None]:
     offset = decode_cursor(cursor)
     page = items[offset:offset + limit]

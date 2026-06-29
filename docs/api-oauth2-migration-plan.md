@@ -83,12 +83,12 @@ Current skeleton choices:
 - Member portal eCP request creation accepts a base64 JPEG/PNG photo, rejects duplicate pending requests, creates an inactive `ecp_records` row, and links the pending `ecp_requests` row by `ecp_record_id`.
 - Public eCP verification endpoint returns only verification-safe details and excludes contact/address/birth-date fields.
 - `GET /api/v1/clubs` uses SQL-level keyset pagination and a case-insensitive `filter` query parameter.
+- `GET /api/v1/clubs/{club_id}/members` uses SQL-level composite keyset pagination and a case-insensitive `filter` query parameter.
 - API requests are written to the existing sanitized `db_logs` path as compact route-template audit events.
 
 Production hardening still required:
 
 - Replace HS256 with OIDC/JWKS validation.
-- Move club member list pagination/filtering into SQL.
 - Replace transitional `db_logs` API audit with a dedicated API audit table.
 - Add rate limiting, especially for public eCP verification.
 - Add idempotency keys for portal eCP request creation.

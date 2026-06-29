@@ -235,6 +235,7 @@ class BackendApiTest(unittest.TestCase):
             "GET",
             "/api/v1/clubs/1/members",
             headers={"Authorization": f"Bearer {token}"},
+            query={"limit": "1", "cursor": "member-cursor", "filter": "ada"},
         )
         denied = app.handle_request(
             "GET",
@@ -244,6 +245,12 @@ class BackendApiTest(unittest.TestCase):
 
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(json.loads(allowed.body)["items"][0]["firstName"], "Ada")
+        self.assertEqual(app.repository.member_list_calls, [{
+            "club_id": 1,
+            "limit": 1,
+            "cursor": "member-cursor",
+            "filter_text": "ada",
+        }])
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(json.loads(denied.body)["error"]["code"], "forbidden")
 

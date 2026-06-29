@@ -228,8 +228,13 @@ class ApiApp:
             raise AuthError(403, "forbidden", "Authenticated caller is not allowed to access this club.")
         limit = parse_limit(query.get("limit"))
         cursor = query.get("cursor")
-        members = list(self.repository.fetch_members(club_id))
-        page, next_cursor = paginate_items(members, limit, cursor)
+        filter_text = query.get("filter") or query.get("q") or ""
+        page, next_cursor = self.repository.list_club_members(
+            club_id=club_id,
+            limit=limit,
+            cursor=cursor,
+            filter_text=filter_text,
+        )
         return json_response(
             200,
             {
