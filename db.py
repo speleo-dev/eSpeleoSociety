@@ -381,6 +381,57 @@ class DatabaseManager:
             ))
         return members
 
+    def fetch_member_search_directory(self) -> List[Member]:
+        current_year = datetime.datetime.now().year
+        query = """
+        SELECT
+            m.member_id, m.member_status, m.title_prefix, m.first_name, m.last_name, m.title_suffix,
+            m.phone, m.email, m.ecp_hash, m.discounted_membership, m.is_directory_stub,
+            m.portrait_url, m.portrait_hash, m.portrait_face_detected, m.portrait_updated_at,
+            ca_primary.club_id AS primary_club_id,
+            c.club_name AS primary_club_name,
+            c.president_id AS primary_club_president_id,
+            EXISTS (
+                SELECT 1 FROM membership_fees mf
+                WHERE mf.member_id = m.member_id AND mf.year = %s
+            ) as has_paid_current_year_fee
+        FROM members m
+        LEFT JOIN LATERAL (
+            SELECT sub_ca.club_id
+            FROM club_affiliations sub_ca
+            WHERE sub_ca.member_id = m.member_id AND sub_ca.is_primary_club = TRUE
+            ORDER BY sub_ca.club_id
+            LIMIT 1
+        ) ca_primary ON TRUE
+        LEFT JOIN clubs c ON c.club_id = ca_primary.club_id
+        ORDER BY lower(COALESCE(m.last_name, '')), lower(COALESCE(m.first_name, '')), m.member_id;
+        """
+        rows = self._fetch_all(query, (current_year,))
+        members = []
+        for row in rows:
+            members.append(Member(
+                status=row['member_status'],
+                title_prefix=row['title_prefix'],
+                first_name=row['first_name'],
+                last_name=row['last_name'],
+                title_suffix=row['title_suffix'],
+                phone=row['phone'],
+                email=row['email'],
+                ecp_hash=row['ecp_hash'],
+                discounted_membership=row['discounted_membership'],
+                primary_club_id=row['primary_club_id'],
+                member_id=row['member_id'],
+                has_paid_current_year_fee=row['has_paid_current_year_fee'],
+                is_president=row['primary_club_president_id'] == row['member_id'],
+                is_directory_stub=row['is_directory_stub'],
+                portrait_url=self._row_get(row, 'portrait_url'),
+                portrait_hash=self._row_get(row, 'portrait_hash'),
+                portrait_face_detected=bool(self._row_get(row, 'portrait_face_detected', False)),
+                portrait_updated_at=self._row_get(row, 'portrait_updated_at'),
+                primary_club_name=row['primary_club_name'],
+            ))
+        return members
+
     # Separated methods for club affiliations
     def fetch_memberships_by_member(self, member_id: int) -> List[Membership]:
         query = """

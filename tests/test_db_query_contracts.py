@@ -13,6 +13,7 @@ class RecordingDatabaseManager(db.DatabaseManager):
         self.fetch_one_row = fetch_one_row
         self.fetch_one_rows = list(fetch_one_rows) if fetch_one_rows is not None else None
         self.last_fetch_all_query = None
+        self.last_fetch_all_params = None
         self.last_fetch_one_query = None
         self.last_execute_query = None
         self.last_execute_params = None
@@ -21,6 +22,7 @@ class RecordingDatabaseManager(db.DatabaseManager):
 
     def _fetch_all(self, query, params=None):
         self.last_fetch_all_query = query
+        self.last_fetch_all_params = params
         return self.fetch_all_rows
 
     def _fetch_one(self, query, params=None):
@@ -200,6 +202,43 @@ class DbQueryContractsTest(unittest.TestCase):
             manager.last_execute_params,
             ("https://storage.example/member_portraits/22.jpg", "d" * 64, True, 22),
         )
+
+    def test_fetch_member_search_directory_uses_lightweight_joined_query(self):
+        manager = RecordingDatabaseManager(fetch_all_rows=[{
+            "member_id": 11,
+            "member_status": "active",
+            "title_prefix": "",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "title_suffix": "",
+            "phone": "0901",
+            "email": "ada@example.sk",
+            "ecp_hash": "ecp-1",
+            "discounted_membership": False,
+            "is_directory_stub": False,
+            "portrait_url": "https://storage.example/portrait.jpg",
+            "portrait_hash": "portrait-hash",
+            "portrait_face_detected": True,
+            "portrait_updated_at": datetime(2026, 6, 30, 12, 0),
+            "primary_club_id": 7,
+            "primary_club_name": "Speleo Nitra",
+            "primary_club_president_id": 11,
+            "has_paid_current_year_fee": True,
+        }])
+
+        members = manager.fetch_member_search_directory()
+
+        self.assertEqual(len(members), 1)
+        self.assertEqual(members[0].first_name, "Ada")
+        self.assertEqual(members[0].primary_club_name, "Speleo Nitra")
+        self.assertTrue(members[0].is_president)
+        self.assertTrue(members[0].has_paid_current_year_fee)
+        self.assertIn("LEFT JOIN LATERAL", manager.last_fetch_all_query)
+        self.assertIn("LEFT JOIN clubs c ON c.club_id = ca_primary.club_id", manager.last_fetch_all_query)
+        self.assertIn("ORDER BY lower(COALESCE(m.last_name, ''))", manager.last_fetch_all_query)
+        self.assertNotIn("birth_date_encrypted", manager.last_fetch_all_query)
+        self.assertNotIn("m.street", manager.last_fetch_all_query)
+        self.assertEqual(len(manager.last_fetch_all_params), 1)
 
     def test_delete_ecp_record_by_id_targets_author_schema_primary_key(self):
         manager = RecordingDatabaseManager()
