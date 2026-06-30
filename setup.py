@@ -15,6 +15,8 @@ SECRET_SETUP_FIELDS = [
     ("db_password", "DB password:"),
     ("credentials_json", "JSON credentials:"),
     ("google_wallet_issuer_id", "Google Wallet Issuer ID:"),
+    ("ecp_verification_base_url", "eCP verification base URL:"),
+    ("ecp_verification_webroot", "eCP verification webroot:"),
     ("project_id", "Google Cloud project:"),
     ("bucket_name", "Bucket name:"),
     ("logo_pic", "Society Logo file:"),
