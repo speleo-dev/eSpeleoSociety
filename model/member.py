@@ -30,7 +30,8 @@ class Member:
                  portrait_url: Optional[str] = None,
                  portrait_hash: Optional[str] = None,
                  portrait_face_detected: bool = False,
-                 portrait_updated_at = None): # Pridaný nový parameter
+                 portrait_updated_at = None,
+                 primary_club_name: Optional[str] = None): # Pridaný nový parameter
         self.member_id = member_id
         self.status = status
         self.title_prefix = title_prefix
@@ -52,6 +53,7 @@ class Member:
         self.ecp_hash = ecp_hash
         self.discounted_membership = discounted_membership
         self.primary_club_id = primary_club_id
+        self.primary_club_name = primary_club_name or ""
         self.memberships: List[Membership] = []
         self.is_president = is_president
         self.has_paid_current_year_fee = has_paid_current_year_fee # Uloženie prednačítanej informácie
