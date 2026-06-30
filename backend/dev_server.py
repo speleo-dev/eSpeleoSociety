@@ -4,10 +4,45 @@ from wsgiref.simple_server import make_server
 import config
 import db
 from backend.app import ApiApp
+from backend.auth import JwtBearerVerifier
 from backend.crypto import make_check_hash_factory
 from backend.repository import DatabaseApiRepository
 from backend.storage import make_gcs_upload_blob
 from backend.wsgi import make_wsgi_app
+
+
+def _env_or_secret(env_name: str, secret_name: str, secret_getter) -> str | None:
+    return os.environ.get(env_name) or secret_getter(secret_name)
+
+
+def _oidc_algorithms(secret_getter) -> list[str] | None:
+    raw_value = os.environ.get("ESPELEO_OIDC_ALGORITHMS") or secret_getter("oidc_algorithms")
+    if not raw_value:
+        return None
+    return [algorithm.strip() for algorithm in raw_value.split(",") if algorithm.strip()]
+
+
+def build_token_verifier_from_environment(secret_getter=None) -> JwtBearerVerifier:
+    secret_getter = secret_getter or config.secret_manager.get_secret
+    issuer = _env_or_secret("ESPELEO_API_ISSUER", "api_issuer", secret_getter) or "espeleo-test"
+    audience = _env_or_secret("ESPELEO_API_AUDIENCE", "api_audience", secret_getter) or "espeleo-api"
+    jwks_url = _env_or_secret("ESPELEO_OIDC_JWKS_URL", "oidc_jwks_url", secret_getter)
+    if jwks_url:
+        return JwtBearerVerifier(
+            jwks_url=jwks_url,
+            audience=audience,
+            issuer=issuer,
+            algorithms=_oidc_algorithms(secret_getter),
+        )
+
+    jwt_secret = _env_or_secret("ESPELEO_API_JWT_SECRET", "api_jwt_secret", secret_getter)
+    if not jwt_secret:
+        raise RuntimeError("Missing ESPELEO_OIDC_JWKS_URL/oidc_jwks_url or ESPELEO_API_JWT_SECRET/api_jwt_secret.")
+    return JwtBearerVerifier(
+        jwt_secret=jwt_secret,
+        audience=audience,
+        issuer=issuer,
+    )
 
 
 def create_wsgi_app_from_environment():
@@ -16,9 +51,7 @@ def create_wsgi_app_from_environment():
         if not config.secret_manager.decrypt_file(pin):
             raise RuntimeError("Could not decrypt secrets file with ESPELEO_SECRETS_PIN.")
 
-    jwt_secret = os.environ.get("ESPELEO_API_JWT_SECRET") or config.secret_manager.get_secret("api_jwt_secret")
-    if not jwt_secret:
-        raise RuntimeError("Missing ESPELEO_API_JWT_SECRET or api_jwt_secret secret.")
+    token_verifier = build_token_verifier_from_environment()
 
     if db.db_manager is None:
         db.db_manager = db.DatabaseManager()
@@ -29,9 +62,7 @@ def create_wsgi_app_from_environment():
             upload_blob=make_gcs_upload_blob(config.secret_manager.get_secret),
             check_hash_factory=make_check_hash_factory(config.secret_manager.get_secret),
         ),
-        jwt_secret=jwt_secret,
-        issuer=os.environ.get("ESPELEO_API_ISSUER", "espeleo-test"),
-        audience=os.environ.get("ESPELEO_API_AUDIENCE", "espeleo-api"),
+        token_verifier=token_verifier,
     )
     return make_wsgi_app(api_app)
 

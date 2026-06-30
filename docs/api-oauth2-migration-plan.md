@@ -65,6 +65,7 @@ Implemented routes:
 - `GET /api/v1/health`
 - `GET /api/v1/clubs`
 - `GET /api/v1/clubs/{club_id}/members`
+- `PATCH /api/v1/members/{member_id}`
 - `GET /api/v1/me`
 - `POST /api/v1/me/ecp-requests`
 - `GET /api/v1/ecp/verify/{token}`
@@ -76,30 +77,35 @@ Contract:
 Current skeleton choices:
 
 - WSGI adapter with no web framework dependency.
-- Development JWT validation through HS256.
-- Roles: `admin`, `club_president`.
+- OIDC/JWKS bearer token validation when `ESPELEO_OIDC_JWKS_URL` or secret `oidc_jwks_url` is configured.
+- Development JWT fallback through HS256 when no JWKS URL is configured.
+- Roles: `admin`, `club_president`, `member`.
 - `club_president` access is constrained by JWT `club_ids`.
+- OIDC role sources include `roles`, `scope`, `realm_access.roles`, and `resource_access.*.roles`.
 - Member portal profile access uses role `member` plus JWT `member_id` / `memberId` as the transitional identity link.
 - Member portal eCP request creation accepts a base64 JPEG/PNG photo, rejects duplicate pending requests, creates an inactive `ecp_records` row, and links the pending `ecp_requests` row by `ecp_record_id`.
+- First admin write endpoint: `PATCH /api/v1/members/{member_id}` updates only a narrow member profile slice and checks `club_affiliations` before allowing `club_president` writes.
 - Public eCP verification endpoint returns only verification-safe details and excludes contact/address/birth-date fields.
 - `GET /api/v1/clubs` uses SQL-level keyset pagination and a case-insensitive `filter` query parameter.
 - `GET /api/v1/clubs/{club_id}/members` uses SQL-level composite keyset pagination and a case-insensitive `filter` query parameter.
 - API requests are written to the existing sanitized `db_logs` path as compact route-template audit events.
+- Desktop API client abstraction now exists in `api_client.py` with bearer-token injection, structured errors, list/profile/eCP request/update-member methods, and tests.
 
 Production hardening still required:
 
-- Replace HS256 with OIDC/JWKS validation.
+- Configure a real OIDC provider and stop using HS256 outside local development.
+- Add Authorization Code + PKCE login flows for the desktop and web portals.
 - Replace transitional `db_logs` API audit with a dedicated API audit table.
 - Add rate limiting, especially for public eCP verification.
 - Add idempotency keys for portal eCP request creation.
-- Add write endpoints only after service-layer authorization is in place.
+- Extend write endpoints only with object-level authorization and transactional service boundaries.
 
 ## Migration Sequence
 
-1. Add API client abstraction to the PyQt app while keeping `DatabaseManager` for current behavior.
-2. Implement backend read endpoints for clubs and members.
+1. Add API client abstraction to the PyQt app while keeping `DatabaseManager` for current behavior. **Started:** `api_client.py` exists but is not wired into PyQt views yet.
+2. Implement backend read endpoints for clubs and members. **Started:** club/member list endpoints exist with SQL pagination.
 3. Switch the desktop client read paths to API client calls.
-4. Implement backend write endpoints with audit logging and role checks.
+4. Implement backend write endpoints with audit logging and role checks. **Started:** narrow `PATCH /members/{member_id}` exists for member profile fields.
 5. Switch desktop write paths to API client calls.
 6. Move GCS upload and Google Wallet issuance behind backend endpoints.
 7. Implement member portal request flow for eCP.

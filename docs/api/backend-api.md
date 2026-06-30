@@ -11,6 +11,7 @@ Implemented API routes:
 - `GET /api/v1/health`
 - `GET /api/v1/clubs`
 - `GET /api/v1/clubs/{club_id}/members`
+- `PATCH /api/v1/members/{member_id}`
 - `GET /api/v1/me`
 - `POST /api/v1/me/ecp-requests`
 - `GET /api/v1/ecp/verify/{token}`
@@ -21,9 +22,17 @@ OpenAPI contract:
 
 ## Auth Model
 
-Authenticated routes use OAuth2-style bearer JWTs.
+Authenticated routes use OAuth2-style bearer JWTs. The backend now supports production-style OIDC/JWKS validation and keeps HS256 only as a local/development fallback.
 
-Development skeleton validation:
+Production OIDC/JWKS validation:
+
+- configure `ESPELEO_OIDC_JWKS_URL` or secret `oidc_jwks_url`
+- configure `ESPELEO_API_ISSUER` / secret `api_issuer`
+- configure `ESPELEO_API_AUDIENCE` / secret `api_audience`
+- optional algorithms: `ESPELEO_OIDC_ALGORITHMS` or secret `oidc_algorithms`, comma-separated, default `RS256`
+- supported role sources: `roles`, `scope`, `realm_access.roles`, and OIDC `resource_access.*.roles`
+
+Development fallback validation:
 
 - algorithm: `HS256`
 - audience: `espeleo-api`
@@ -39,11 +48,10 @@ Supported roles in this slice:
 - `club_president`
 - `member`
 
-Final production direction:
+Authorization model:
 
-- replace shared-secret HS256 validation with OIDC/JWKS validation,
 - keep the handler-level role checks,
-- add service-layer authorization for every write operation.
+- add object-level authorization for every write operation.
 
 ## Endpoint Semantics
 
@@ -101,6 +109,49 @@ Requires:
 - `club_president` with `{club_id}` present in the JWT `club_ids` claim.
 
 The response includes operational member data needed for administration. This endpoint should not be exposed to ordinary members.
+
+### `PATCH /api/v1/members/{member_id}`
+
+Requires:
+
+- `admin`, or
+- `club_president` when the target member belongs to one of the caller's JWT `club_ids`.
+
+This is the first administrative write endpoint behind the backend API. It intentionally exposes only a narrow profile edit surface:
+
+```json
+{
+  "status": "active",
+  "titlePrefix": "Mgr.",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "titleSuffix": "",
+  "email": "ada@example.sk",
+  "phone": "0901",
+  "discountedMembership": false
+}
+```
+
+Writable fields map to `members.member_status`, titles, first/last name, email, phone, and `discounted_membership`.
+
+Not writable through this endpoint:
+
+- encrypted birth date,
+- address fields,
+- eCP hashes and verification secrets,
+- portrait/photo URLs or hashes,
+- club affiliations and club roles.
+
+Rules:
+
+- request body must be a JSON object,
+- at least one supported field is required,
+- unknown fields return `422 unknown_member_update_field`,
+- `status` must be one of `applicant`, `active`, `inactive`, `blocked`,
+- `firstName` and `lastName` cannot be blank when supplied,
+- `club_president` callers are checked against `club_affiliations` before any update runs.
+
+Response `200` returns the same member summary shape as the club member list.
 
 ### `GET /api/v1/me`
 
@@ -244,6 +295,16 @@ The skeleton has no web framework dependency. It uses a WSGI adapter and Python'
 ```bash
 cd /home/dankez/eSpeleoSociety
 ESPELEO_SECRETS_PIN=<local-secrets-pin> \
+ESPELEO_OIDC_JWKS_URL=https://idp.example/realms/espeleo/protocol/openid-connect/certs \
+ESPELEO_API_ISSUER=https://idp.example/realms/espeleo \
+ESPELEO_API_AUDIENCE=espeleo-api \
+ESPELEO_API_PORT=8080 \
+.venv/bin/python -m backend.dev_server
+```
+
+For local tests without an OIDC provider, use the development fallback:
+
+```bash
 ESPELEO_API_JWT_SECRET=dev-secret \
 ESPELEO_API_PORT=8080 \
 .venv/bin/python -m backend.dev_server
@@ -265,8 +326,9 @@ Authorization: Bearer <jwt>
 
 - The API still uses the existing PostgreSQL schema and DB manager.
 - `GET /api/v1/clubs` and `GET /api/v1/clubs/{club_id}/members` have SQL-level filtering and keyset pagination.
-- JWT validation is development-only HS256. Production should use OIDC/JWKS.
-- The first member write endpoint exists for eCP requests; admin write endpoints are still not implemented.
+- OIDC discovery and login/session handling are not implemented; the API validates already-issued bearer access tokens.
+- HS256 remains available only as a development fallback when no JWKS URL is configured.
+- Only the first narrow admin member update endpoint exists; create/delete, fee writes, eCP approval, club role changes, and SEPA writes still need backend endpoints.
 - No refresh tokens, login UI, or portal session handling exists yet.
 - `POST /api/v1/me/ecp-requests` accepts JSON/base64 upload as a transitional API shape. A production portal can later switch to multipart or direct-to-storage signed upload without changing the approval data model.
 - API request audit currently writes through the existing `db_logs` table; a dedicated API audit table and rate limiting are still required.
@@ -274,7 +336,7 @@ Authorization: Bearer <jwt>
 ## Next Backend Slices
 
 1. Add a dedicated API audit table and rate limiting.
-2. Add portal-member endpoint for "my profile" and "request eCP".
-3. Add eCP revocation/renewal endpoints behind `admin`.
-4. Add idempotency keys for `POST /api/v1/me/ecp-requests`.
-5. Replace HS256 development JWT validation with OIDC discovery and JWKS.
+2. Switch one desktop read path to `api_client.py` while keeping DB fallback behind a feature flag/config switch.
+3. Add idempotency keys for `POST /api/v1/me/ecp-requests`.
+4. Add admin/president write endpoints for member create, club affiliation/role, fees, and eCP request approval.
+5. Add OIDC Authorization Code + PKCE login flow for the desktop and web portals.

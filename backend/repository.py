@@ -54,6 +54,17 @@ class MemberRecord:
 
 
 class DatabaseApiRepository:
+    MEMBER_UPDATE_COLUMNS = frozenset({
+        "member_status",
+        "title_prefix",
+        "first_name",
+        "last_name",
+        "title_suffix",
+        "email",
+        "phone",
+        "discounted_membership",
+    })
+
     def __init__(self, db_manager, upload_blob=None, check_hash_factory=None):
         self.db_manager = db_manager
         self.upload_blob = upload_blob
@@ -175,6 +186,83 @@ class DatabaseApiRepository:
         members = [self._member_from_row(row) for row in page_rows]
         next_cursor = self._member_cursor_from_row(page_rows[-1]) if len(rows) > limit and page_rows else None
         return members, next_cursor
+
+    def member_belongs_to_any_club(self, member_id: int, club_ids) -> bool:
+        normalized_club_ids = sorted({self._int_value(club_id, 0) for club_id in club_ids if self._int_value(club_id, 0) > 0})
+        if not normalized_club_ids:
+            return False
+        row = self.db_manager._fetch_one(
+            """
+            SELECT 1 AS exists
+            FROM club_affiliations
+            WHERE member_id = %s
+              AND club_id = ANY(%s)
+            LIMIT 1;
+            """,
+            (member_id, normalized_club_ids),
+        )
+        return bool(row)
+
+    def fetch_member_summary(self, member_id: int):
+        row = self.db_manager._fetch_one(
+            """
+            SELECT
+                m.member_id,
+                m.member_status,
+                m.title_prefix,
+                m.first_name,
+                m.last_name,
+                m.title_suffix,
+                m.phone,
+                m.email,
+                m.ecp_hash,
+                m.is_directory_stub,
+                primary_ca.club_id AS primary_club_id,
+                primary_ca.role AS club_role,
+                EXISTS (
+                    SELECT 1
+                    FROM membership_fees mf
+                    WHERE mf.member_id = m.member_id AND mf.year = %s
+                ) AS has_paid_current_year_fee
+            FROM members m
+            LEFT JOIN LATERAL (
+                SELECT ca.club_id, ca.role
+                FROM club_affiliations ca
+                WHERE ca.member_id = m.member_id AND ca.is_primary_club = TRUE
+                LIMIT 1
+            ) primary_ca ON TRUE
+            WHERE m.member_id = %s
+            LIMIT 1;
+            """,
+            (date.today().year, member_id),
+        )
+        if not row:
+            return None
+        return self._member_from_row(row)
+
+    def update_member_profile(self, member_id: int, changes: dict):
+        unsupported_columns = set(changes) - self.MEMBER_UPDATE_COLUMNS
+        if unsupported_columns:
+            raise ValueError(f"Unsupported member update columns: {', '.join(sorted(unsupported_columns))}")
+        if not changes:
+            return self.fetch_member_summary(member_id)
+
+        columns = list(changes.keys())
+        assignments = ", ".join(f"{column} = %s" for column in columns)
+        params = tuple(changes[column] for column in columns) + (member_id,)
+        row = self.db_manager._fetch_one(
+            f"""
+            UPDATE members
+            SET {assignments}
+            WHERE member_id = %s
+            RETURNING member_id;
+            """,
+            params,
+        )
+        if not row:
+            return None
+        self.db_manager._log_action("UPDATE", "members", f"Updated API member profile for member ID {member_id}")
+        return self.fetch_member_summary(member_id)
 
     def fetch_member_portal_profile(self, member_id: int):
         row = self.db_manager._fetch_one(
