@@ -1099,7 +1099,7 @@ class DatabaseManager:
         self,
         ecp_record_id: int,
         ecp_hash: str,
-        qr_url: str,
+        qr_url: str | None,
         qr_key_id: str,
         qr_payload: dict,
         qr_payload_hash: str,

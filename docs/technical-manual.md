@@ -53,7 +53,7 @@ Prakticky pouzitelne casti dnes:
 - admin vie vydat eCP priamo z clenskeho dialogu,
 - admin vie schvalit alebo zamietnut pending eCP ziadost,
 - eCP issuance generuje podpisany offline overitelny QR payload,
-- eCP QR obrazok sa nahrava do GCS,
+- eCP JPG/PDF karta a tokenizovana overovacia HTML stranka sa nahravaju do uloziska/hostingu,
 - eCP QR metadata sa ukladaju do databazy,
 - po vydani alebo schvaleni eCP sa aplikacia pokusi poslat SMTP email clenovi,
 - DB schema a zapisove metody chrania jeden primarny klub na clena a jeden poplatok na clena/rok/typ,
@@ -81,8 +81,8 @@ System ma podporit obcianske zdruzenie alebo zvaz, ktory eviduje:
 - clenske poplatky,
 - ziadosti o elektronicky preukaz,
 - fotky a metadata eCP,
-- elektronicky preukaz ako QR obrazok,
-- neskor aj Google Wallet pass,
+- elektronicky preukaz ako JPG/PDF preukaz so signed QR,
+- Google Wallet pass so signed QR cez native Wallet barcode,
 - spravy alebo notifikacie pre clenov.
 
 eCP ma byt overitelny aj offline. Preto QR kod nesmie byt iba nahodny token do databazy. Musi obsahovat minimalne zakladne udaje a podpis, ktory overovacia aplikacia vie skontrolovat verejnym klucom aj bez internetu.
@@ -100,8 +100,8 @@ Aktualna aplikacia ma tieto vrstvy:
 | DatabaseManager | SQL dotazy, mapovanie riadkov na modely, zapis audit logov | Implementovane, ale priamo sa pripaja na PostgreSQL |
 | Utility | Konfiguracia, sifrovanie datumov, GCS upload, QR helpery, SEPA XML parsing, status messages | Implementovane, niektore casti zavisia od externych secrets |
 | SEPA processing | Cista logika klasifikacie transakcii bez PyQt/DB zavislosti | Implementovane a testovane |
-| eCP QR podpisovanie | Ed25519 payload, QR PNG, upload handoff, DB metadata | Implementovane a testovane |
-| Google Wallet | Odoslanie passu do Wallet | Placeholder |
+| eCP QR podpisovanie | Ed25519 payload, in-memory QR render pre JPG/PDF, DB metadata | Implementovane a testovane |
+| Google Wallet | Native Wallet `QR_CODE` barcode z podpisaneho payloadu, realne API volanie este chyba | Placeholder s pripravenym barcode payloadom |
 | API backend | HTTPS API a OAuth2/OIDC | Zatial iba dokumentovany plan |
 | Portaly | Portal clena a portal predsedu klubu | Neimplementovane |
 
@@ -143,7 +143,7 @@ Secrets su ulozene lokalne v sifrovanom subore. Subor sa sifruje PINom cez PBKDF
 | `credentials_json` | Google service account credentials |
 | `google_wallet_issuer_id` | Issuer ID pre buducu Google Wallet integraciu |
 | `project_id` | Google Cloud project |
-| `bucket_name` | GCS bucket pre fotky, loga a QR obrazky |
+| `bucket_name` | GCS bucket pre fotky, loga, JPG/PDF karty a staticke eCP overovacie stranky |
 | `logo_pic` | Nazov objektu loga organizacie |
 | `crypt_key` | Symetricky kluc pre niektore lokalne/DB kryptograficke operacie |
 | `smtp_server` | SMTP server pre email notifikacie |
@@ -153,6 +153,8 @@ Secrets su ulozene lokalne v sifrovanom subore. Subor sa sifruje PINom cez PBKDF
 | `log_level` | Zakladna uroven logovania pre buduce pouzitie |
 | `ecp_signing_key_id` | Identifikator eCP podpisovacieho kluca |
 | `ecp_signing_private_key_b64` | Base64 PEM privatny Ed25519 kluc pre podpis eCP QR |
+| `ecp_verification_base_url` | Verejny base URL pre tokenizovane overenie, napriklad `https://ecp.sss.sk/v` |
+| `ecp_verification_webroot` | Lokalne dostupny webroot/suborovy ciel pre zapis statickych overovacich stranok |
 
 Dolezita poznamka: DB heslo, SMTP heslo, service account JSON a privatny eCP podpisovaci kluc nemaju dlhodobo zostat v desktop klientovi. Patri to do backend secret managementu.
 
@@ -266,7 +268,7 @@ Obrazovka eCP ziadosti nacitava pending ziadosti. Pre kazdu zobrazuje:
 - status,
 - tlacidlo na spracovanie.
 
-Schvalenie ziadosti vytvori finalny eCP hash, podpise QR payload, nahra QR obrazok, aktualizuje eCP record, zapise eCP hash clena a nastavi ziadost na approved.
+Schvalenie ziadosti vytvori finalny eCP hash, podpise QR payload, nahra JPG/PDF kartu a tokenizovanu overovaciu HTML stranku, aktualizuje eCP record, zapise eCP hash clena a nastavi ziadost na approved.
 
 Zamietnutie ziadosti nastavi status rejected, zmaze eCP record a zmaze fotku z GCS.
 
@@ -539,7 +541,7 @@ Polia:
 | `photo_hash` | Nazov/fingerprint fotky v GCS bez pripony |
 | `ecp_active` | Ci je eCP aktivny |
 | `check_hash` | Lokalne overovaci HMAC-like token |
-| `qr_url` | Verejne URL QR PNG objektu |
+| `qr_url` | Volitelne legacy URL samostatneho QR PNG; v novom Wallet flow je `NULL` |
 | `qr_key_id` | ID podpisovacieho kluca |
 | `qr_payload` | Podpisany JSON payload |
 | `qr_payload_hash` | SHA-256 hash serializovaneho QR payloadu |
@@ -566,7 +568,7 @@ Dolezite medzery:
 
 - `photo_hash` pravdepodobne ma byt unikatny, schema to zatial nevynucuje.
 - `wallet_status` nema check constraint.
-- eCP vydanie by malo byt transakcne spolu s QR uploadom, DB update a Wallet stavom.
+- eCP vydanie by malo byt transakcne spolu s kartovymi uploadmi, DB update a Wallet stavom.
 - Privatne podpisovanie patri do backendu.
 
 ### ecp_requests
@@ -769,14 +771,15 @@ Pri vydani eCP priamo z clenskeho dialogu:
 5. Vygeneruje sa novy `ecp_hash`.
 6. Nacita sa primarny klub clena.
 7. Nacita sa podpisovaci kluc a key id zo secrets.
-8. Vytvori sa podpisany claim a QR PNG.
-9. QR PNG sa nahra do GCS.
-10. Fotka sa nahra do GCS.
-11. Vytvori sa eCP record.
-12. eCP record sa aktualizuje QR metadatami a aktivuje sa.
-13. Clenovi sa nastavi aktualny `ecp_hash`.
+8. Vytvori sa podpisany claim a in-memory QR render pre JPG/PDF kartu.
+9. Fotka sa nahra do GCS.
+10. Vygeneruje sa JPG/PDF karta a tokenizovana online overovacia HTML stranka.
+11. JPG/PDF karta a overovacia HTML stranka sa nahraju.
+12. Vytvori sa eCP record.
+13. eCP record sa aktualizuje QR metadatami, URL overenia, URL kariet a aktivuje sa.
+14. Clenovi sa nastavi aktualny `ecp_hash`.
 
-Ak chyba podpisovaci kluc alebo QR upload zlyha, eCP sa neaktivuje.
+Ak chyba podpisovaci kluc alebo upload karty/overovacej stranky zlyha, eCP sa neaktivuje.
 
 Po uspesnom DB zapise sa aplikacia pokusi odoslat email clenovi cez SMTP. Zlyhanie emailu sa zobrazi ako warning a nesposobi rollback uz vydaneho eCP. Toto je prechodne desktopove riesenie; finalny stav ma posielat email z backendu.
 
@@ -788,13 +791,14 @@ Pri schvaleni ziadosti:
 2. Nacita sa eCP record cez `ecp_record_id`.
 3. Vygeneruje sa finalny `ecp_hash`.
 4. Vytvori sa podpisany QR payload.
-5. QR PNG sa nahra do GCS.
-6. Existujuci eCP record sa aktualizuje finalnym hashom, QR metadatami a aktivnym stavom.
-7. Clenovi sa nastavi aktualny `ecp_hash`.
-8. Ziadost sa nastavi na `approved`.
-9. Zavola sa Google Wallet placeholder.
+5. Vygeneruje sa JPG/PDF karta a tokenizovana online overovacia HTML stranka.
+6. JPG/PDF karta a overovacia HTML stranka sa nahraju.
+7. Existujuci eCP record sa aktualizuje finalnym hashom, QR metadatami, URL overenia, URL kariet a aktivnym stavom.
+8. Clenovi sa nastavi aktualny `ecp_hash`.
+9. Ziadost sa nastavi na `approved`.
+10. Zavola sa Google Wallet placeholder s native `QR_CODE` barcode hodnotou z podpisaneho payloadu.
 
-Transakcnost je zatial obmedzena. DB update, GCS upload a Wallet stav nie su este riadene backendovou transakcnou orchestriou.
+Transakcnost je zatial obmedzena. DB update, GCS/hosting upload a Wallet stav nie su este riadene backendovou transakcnou orchestriou.
 
 Po schvaleni sa aplikacia pokusi poslat SMTP email clenovi. Ak email zlyha, ziadost zostane schvalena a pouzivatel dostane warning, aby mohol clenovi napisat manualne alebo chybu riesit v SMTP nastaveniach.
 
@@ -827,7 +831,7 @@ Sprava obsahuje:
 - datum platnosti, ak je dostupny,
 - zakladny kontakt na spravcu/klub.
 
-Sprava zamerne neposiela privatne kluce ani DB identifikatory. QR URL sa do emailu neposiela ako produktove rozhodnutie, kym nebude jasne, ci ma byt verejne pristupne alebo chranene backendom.
+Sprava zamerne neposiela privatne kluce ani DB identifikatory. Posiela online overovaci URL a odkazy na kartu iba pre uz vydany eCP; samostatny QR PNG URL uz nie je produktovy artefakt.
 
 Medzery:
 
@@ -844,7 +848,11 @@ Databaza uz ma polia pre Wallet:
 - `wallet_object_id`,
 - `wallet_last_error`.
 
-Aktualne vsak realna Google Wallet integracia nie je implementovana. Existuje iba funkcia, ktora simuluje odoslanie a vracia uspech.
+Aktualne vsak realna Google Wallet integracia nie je implementovana. Existuje iba funkcia, ktora pripravi native Wallet barcode payload a simuluje odoslanie. Barcode nema pouzivat URL na QR PNG. Ma pouzit:
+
+- `type`: `QR_CODE`,
+- `value`: podpisany `issued_qr.qr_data`,
+- `alternateText`: kratky text typu `eCP 123`.
 
 Odporucany stavovy model:
 
@@ -1088,7 +1096,7 @@ Najlepsi postup po aktualnom stave:
 
 1. Implementovat realnu Google Wallet issuance vrstvu.
 2. Doplnit stavove prechody pre `wallet_status`.
-3. Zabezpecit, aby eCP approval nevedel ticho divergovat medzi DB, QR uploadom a Wallet stavom.
+3. Zabezpecit, aby eCP approval nevedel ticho divergovat medzi DB, kartovymi uploadmi, overovacou strankou a Wallet stavom.
 4. Navrhnut backend API kontrakty ako DTO, nie ako priame kopie tabuliek.
 5. Vytvorit backend skeleton s OAuth2/OIDC validaciou tokenov.
 6. Presunut eCP podpisovanie do backendu.

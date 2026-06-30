@@ -15,6 +15,7 @@ from babel import Locale, UnknownLocaleError # Import for Babel
 from babel.core import localedata # Changed import
 from config import secret_manager
 from PyQt5.QtWidgets import QMainWindow, QApplication # Added for type hinting, access to status_bar and QApplication
+from wallet_pass import build_wallet_barcode_from_request
 
 if TYPE_CHECKING:
     from model import Member, Club
@@ -126,7 +127,18 @@ def upload_photo_to_bucket(photo_hash: str, image_data):
 def send_to_google_wallet(req_details):
     # Simulácia odoslania nového objektu preukazu do Google Wallet API.
     # Implementujte reálne volanie API podľa dokumentácie Google Wallet.
-    print("Odosielam nový objekt preukazu do Google Wallet API pre žiadosť", get_request_field(req_details, "photo_hash", "")) # Assuming translated key
+    try:
+        barcode = build_wallet_barcode_from_request(req_details, get_request_field)
+    except ValueError as exc:
+        print("Google Wallet eCP barcode payload missing:", exc)
+        return False
+
+    print(
+        "Odosielam nový objekt preukazu do Google Wallet API pre žiadosť",
+        get_request_field(req_details, "photo_hash", ""),
+        "s natívnym čiarovým kódom",
+        barcode["type"],
+    ) # Assuming translated key
     # Simulovaný výsledok:
     return True
 

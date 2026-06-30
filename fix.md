@@ -511,3 +511,48 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - first/last-name prefix matching,
   - lightweight DB search directory query and mapping.
 - Hardened `get_state_pixmap()` for `blocked` member status so the default list cannot crash on a blocked member.
+
+## Native Google Wallet Barcode And `ecp.sss.sk` Verification
+
+- Adjusted the eCP issuance flow to match the author's correction: do not upload a standalone generated QR PNG for Google Wallet.
+- Google Wallet now has a dedicated helper that builds a native Wallet barcode payload:
+  - `type = QR_CODE`,
+  - `value = issued_qr.qr_data`,
+  - `alternateText = eCP {member_id}`.
+- The approval flow now passes `signed_qr_data` into the Wallet placeholder, so the future real Wallet API layer can use native barcode rendering instead of a QR image URL.
+- `issue_and_upload_signed_ecp_qr()` now returns the signed payload plus `qr_url = None`; the PNG bytes remain only in memory for card rendering.
+- `issue_and_upload_ecp_delivery_bundle()` no longer uploads objects under `ecp_qr/`.
+- JPG/PDF card generation still embeds the same signed QR payload in the rendered card.
+- Online verification can now use a configured public base URL such as `https://ecp.sss.sk/v`.
+  - With that setting enabled, generated verification HTML is stored under `v/{token}.html`.
+  - Public links are emitted as `https://ecp.sss.sk/v/{token}`.
+- If `ecp_verification_webroot` is configured and locally writable, verification HTML is published directly to that webroot instead of being uploaded through the GCS callback.
+- The webroot publisher creates missing directories and rejects paths that escape the configured webroot.
+- Verification HTML omits the old "QR PNG" asset link when no standalone QR image exists.
+- Setup secrets now include:
+  - `ecp_verification_base_url`,
+  - `ecp_verification_webroot`.
+- DB update typing now allows `qr_url = NULL` because the standalone QR image URL is a legacy/optional field.
+- Updated documentation:
+  - `docs/ecp-signing.md`,
+  - `docs/technical-manual.md`.
+- Added tests for:
+  - no `ecp_qr/` upload in delivery bundle,
+  - public `ecp.sss.sk/v` verification URL generation,
+  - direct webroot publishing of verification HTML,
+  - verification page without QR PNG link,
+  - native Wallet barcode payload from signed QR data,
+  - approval flow wiring of `signed_qr_data`,
+  - setup dialog fields for verification deployment settings.
+- Hosting check performed for `ecp.sss.sk`:
+  - HTTPS works,
+  - Apache/PHP works,
+  - PHP has `pdo_pgsql`, `curl`, `openssl`, `sodium`, `gd`, `imagick`, and `zip`,
+  - extensionless clean URLs under `/v/{token}` work through the existing `.htaccess` rule when `v/{token}.html` exists.
+
+Remaining work after this slice:
+
+- implement the real Google Wallet API call that creates/updates pass objects and uses the prepared barcode payload,
+- decide the production deployment mode for `v/{token}.html`: direct webroot write from backend, mounted webroot, or a dedicated SFTP/rsync/FTP deployer,
+- move eCP signing, card generation, Wallet issuance, and verification-page deployment behind the OAuth2 backend,
+- add transactional issuance orchestration so DB state, card files, verification HTML, email, and Wallet status cannot silently diverge.

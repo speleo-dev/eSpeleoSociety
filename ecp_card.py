@@ -120,7 +120,7 @@ def build_verification_page_html(
     member,
     club,
     issued_qr,
-    qr_url: str,
+    qr_url: str | None,
     card_image_url: str,
     card_pdf_url: str,
     portrait_url: str | None = None,
@@ -136,6 +136,9 @@ def build_verification_page_html(
     if portrait_url:
         portrait_html = f'<img class="portrait" src="{escape(portrait_url)}" alt="Portret clena">'
 
+    qr_link = ""
+    if qr_url:
+        qr_link = f'<a href="{escape(qr_url)}" rel="noopener noreferrer">QR PNG</a>'
     payload_json = escape(json.dumps(issued_qr.payload, sort_keys=True, ensure_ascii=False))
     html = f"""<!doctype html>
 <html lang="sk">
@@ -180,7 +183,7 @@ def build_verification_page_html(
           <dt>Hash payloadu</dt><dd>{escape(issued_qr.payload_hash)}</dd>
         </dl>
         <div class="assets">
-          <a href="{escape(qr_url)}" rel="noopener noreferrer">QR PNG</a>
+          {qr_link}
           <a href="{escape(card_image_url)}" rel="noopener noreferrer">Preukaz JPG</a>
           <a href="{escape(card_pdf_url)}" rel="noopener noreferrer">Preukaz PDF</a>
         </div>

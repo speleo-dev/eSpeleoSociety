@@ -19,9 +19,17 @@ The eCP issuance and approval flows now create an Ed25519-signed QR payload befo
 - signing key id,
 - Ed25519 signature.
 
-The QR image is uploaded as a PNG object under the `ecp_qr/` object prefix using the issued eCP hash as the object name. If signing configuration is missing, invalid, or the QR upload fails, the eCP is not activated.
+The issuance flow no longer uploads a standalone QR PNG object for Google Wallet. Google Wallet should render the same signed payload through its native barcode support: `barcode.type = QR_CODE` and `barcode.value = issued_qr.qr_data`. The generated PNG bytes are kept only as an in-memory rendering source for the JPG/PDF card assets.
 
-The database stores the QR URL, signing key id, signed payload, payload hash, issue timestamp, validity date, and Wallet issuance status on the eCP record. Existing databases need the QR metadata migration before this code path can run.
+The database stores the optional legacy QR URL, signing key id, signed payload, payload hash, issue timestamp, validity date, public verification URL, card URLs, legal document URL, and Wallet issuance status on the eCP record. Existing databases need the QR metadata migration before this code path can run.
+
+Public online verification URLs are tokenized static pages. In production the intended public base is:
+
+```text
+https://ecp.sss.sk/v/{token}
+```
+
+The corresponding generated HTML object is stored under `v/{token}.html` when `ecp_verification_base_url` is configured.
 
 ## Required Secrets
 
@@ -29,6 +37,8 @@ Configure these secrets in the encrypted desktop secrets file:
 
 - `ecp_signing_key_id`: stable key identifier, for example `sss-ecp-2026-01`.
 - `ecp_signing_private_key_b64`: base64 encoding of the PEM private key.
+- `ecp_verification_base_url`: public base URL for tokenized verification pages, for example `https://ecp.sss.sk/v`.
+- `ecp_verification_webroot`: local filesystem path to the verification hosting webroot when the app/backend can write there directly, for example the `ecp.sss.sk` Apache directory on the hosting server.
 
 The signing loader also accepts `ecp_signing_private_key_pem` when the encrypted secrets file is edited manually. The setup dialog exposes the base64 form because it is easier to paste into a single-line field.
 
