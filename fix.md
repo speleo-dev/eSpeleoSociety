@@ -407,3 +407,85 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - `MemberRecord` mapping for API serialization.
 - Restored the API fake repository method in tests so `GET /api/v1/clubs/{club_id}/members` uses the same interface as production code.
 - Re-added the repository contract test for club member SQL filtering and composite cursor behavior.
+
+## API/OAuth2 Write Slice: Points 2-4
+
+- Continued the author migration plan points 2-4:
+  - real OAuth2/OIDC backend token validation,
+  - desktop API client abstraction,
+  - first backend write endpoint for administration.
+- Added `backend.auth.JwtBearerVerifier`:
+  - validates RS256 OIDC/OAuth2 access tokens through JWKS,
+  - keeps HS256 shared-secret validation only as a development fallback,
+  - verifies audience and issuer,
+  - supports role claims from `roles`, `scope`, `realm_access.roles`, and `resource_access.*.roles`,
+  - handles role claims provided as a single string without splitting them into individual characters,
+  - keeps `club_ids` / `clubs` and `member_id` / `memberId` normalization.
+- Updated `backend.dev_server` runtime configuration:
+  - production path: `ESPELEO_OIDC_JWKS_URL` or secret `oidc_jwks_url`,
+  - issuer: `ESPELEO_API_ISSUER` or secret `api_issuer`,
+  - audience: `ESPELEO_API_AUDIENCE` or secret `api_audience`,
+  - optional algorithms: `ESPELEO_OIDC_ALGORITHMS` or secret `oidc_algorithms`,
+  - fallback path: `ESPELEO_API_JWT_SECRET` or secret `api_jwt_secret`.
+- Added `api_client.py` for the future desktop thick-client migration:
+  - injects `Authorization: Bearer <token>`,
+  - creates request IDs,
+  - exposes `list_clubs()`, `list_club_members()`, `get_my_profile()`, `request_my_ecp()`, and `update_member()`,
+  - raises structured `ApiClientError` with HTTP status, API error code, message, request id, and payload.
+- Added `PATCH /api/v1/members/{member_id}`:
+  - role `admin` can update the supported member profile fields,
+  - role `club_president` can update only members that belong to one of the caller's JWT `club_ids`,
+  - object-level check is done through `club_affiliations` before the update.
+- Writable fields in the new endpoint:
+  - `status`,
+  - `titlePrefix`,
+  - `firstName`,
+  - `lastName`,
+  - `titleSuffix`,
+  - `email`,
+  - `phone`,
+  - `discountedMembership`.
+- Fields intentionally not writable in this slice:
+  - encrypted birth date,
+  - address fields,
+  - eCP hashes and check hashes,
+  - portrait URLs/hashes,
+  - club affiliation and club role changes.
+- Added validation errors:
+  - `invalid_json`,
+  - `invalid_request_body`,
+  - `unknown_member_update_field`,
+  - `invalid_member_update_value`,
+  - `invalid_member_status`,
+  - `invalid_member_name`,
+  - `no_update_fields`,
+  - `member_not_found`.
+- Added repository support:
+  - `member_belongs_to_any_club(member_id, club_ids)`,
+  - `fetch_member_summary(member_id)`,
+  - `update_member_profile(member_id, changes)`,
+  - allowlist-based dynamic SQL update to prevent arbitrary column writes.
+- Updated documentation:
+  - `docs/api/backend-api.md`,
+  - `docs/api/openapi.yaml`,
+  - `docs/api-oauth2-migration-plan.md`.
+- Added tests for:
+  - RS256/JWKS validation with OIDC resource roles,
+  - HS256 dev fallback,
+  - string role claim normalization,
+  - dev server OIDC/JWKS configuration,
+  - API client request construction and structured error handling,
+  - admin member profile PATCH,
+  - club president object-level PATCH authorization,
+  - rejected unknown member update fields,
+  - repository club membership lookup,
+  - repository update allowlist and summary return.
+- Verification run:
+  - `.venv/bin/python -m unittest discover -s tests -v` -> 103 tests passed, 1 PostgreSQL integration test skipped because `ESPELEO_TEST_DATABASE_URL` is not set,
+  - `.venv/bin/python -m compileall -q .`,
+  - `git diff --check`.
+- Remaining work after this slice:
+  - wire `api_client.py` into actual PyQt read paths behind config/feature flag,
+  - implement OAuth2 Authorization Code + PKCE login for desktop and portal,
+  - add backend endpoints for member create, club affiliation/role changes, fees, eCP approval/revocation, SEPA imports,
+  - add idempotency keys and a dedicated API audit table.

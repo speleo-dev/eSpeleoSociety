@@ -217,6 +217,74 @@ class BackendRepositoryTest(unittest.TestCase):
         self.assertEqual(fake_db.last_params[-1], 2)
         self.assertIn("%ada%", fake_db.last_params)
 
+    def test_member_belongs_to_any_club_uses_affiliation_lookup(self):
+        fake_db = FakeDbManager(row={"exists": 1})
+        repository = DatabaseApiRepository(fake_db)
+
+        self.assertTrue(repository.member_belongs_to_any_club(101, {2, 1}))
+
+        self.assertIn("FROM club_affiliations", fake_db.last_query)
+        self.assertIn("club_id = ANY(%s)", fake_db.last_query)
+        self.assertEqual(fake_db.last_params, (101, [1, 2]))
+
+    def test_member_belongs_to_any_club_short_circuits_empty_clubs(self):
+        fake_db = FakeDbManager(row={"exists": 1})
+        repository = DatabaseApiRepository(fake_db)
+
+        self.assertFalse(repository.member_belongs_to_any_club(101, set()))
+
+        self.assertIsNone(fake_db.last_query)
+
+    def test_update_member_profile_updates_allowed_columns_and_returns_summary(self):
+        fake_db = FakeDbManager(fetch_one_rows=[
+            {"member_id": 101},
+            {
+                "member_id": 101,
+                "member_status": "inactive",
+                "title_prefix": "",
+                "first_name": "Augusta",
+                "last_name": "Lovelace",
+                "title_suffix": "",
+                "phone": "0909",
+                "email": "ada@example.sk",
+                "ecp_hash": "ecp-1",
+                "primary_club_id": 1,
+                "club_role": "member",
+                "has_paid_current_year_fee": True,
+                "is_directory_stub": False,
+            },
+        ])
+        repository = DatabaseApiRepository(fake_db)
+
+        member = repository.update_member_profile(101, {
+            "first_name": "Augusta",
+            "member_status": "inactive",
+            "phone": "0909",
+            "discounted_membership": True,
+        })
+
+        update_query, update_params = fake_db.fetch_one_calls[0]
+        self.assertEqual(member.first_name, "Augusta")
+        self.assertEqual(member.status, "inactive")
+        self.assertIn("UPDATE members", update_query)
+        self.assertIn("first_name = %s", update_query)
+        self.assertIn("member_status = %s", update_query)
+        self.assertIn("discounted_membership = %s", update_query)
+        self.assertIn("WHERE member_id = %s", update_query)
+        self.assertEqual(update_params, ("Augusta", "inactive", "0909", True, 101))
+        self.assertIn("SELECT", fake_db.fetch_one_calls[1][0])
+        self.assertIn("FROM members m", fake_db.fetch_one_calls[1][0])
+        self.assertEqual(fake_db.fetch_one_calls[1][1], (date.today().year, 101))
+
+    def test_update_member_profile_rejects_unsupported_columns(self):
+        fake_db = FakeDbManager()
+        repository = DatabaseApiRepository(fake_db)
+
+        with self.assertRaises(ValueError):
+            repository.update_member_profile(101, {"ecp_hash": "must-not-be-writable"})
+
+        self.assertEqual(fake_db.fetch_one_calls, [])
+
     def test_create_member_ecp_request_uploads_photo_and_links_record(self):
         uploads = []
 

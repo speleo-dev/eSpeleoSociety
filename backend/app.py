@@ -47,16 +47,18 @@ class ApiApp:
     def __init__(
         self,
         repository,
-        jwt_secret: str,
+        jwt_secret: str | None = None,
         issuer: str = "espeleo-test",
         audience: str = "espeleo-api",
         audit_sink=None,
+        token_verifier=None,
     ):
         self.repository = repository
         self.jwt_secret = jwt_secret
         self.issuer = issuer
         self.audience = audience
         self.audit_sink = audit_sink or repository
+        self.token_verifier = token_verifier
 
     def handle_request(self, method: str, path: str, headers=None, query=None, body=None) -> ApiResponse:
         headers = headers or {}
@@ -79,6 +81,7 @@ class ApiApp:
                         jwt_secret=self.jwt_secret,
                         audience=self.audience,
                         issuer=self.issuer,
+                        token_verifier=self.token_verifier,
                     )
                     if method == "GET" and path == "/api/v1/clubs":
                         response = self._list_clubs(query, context)
@@ -87,12 +90,16 @@ class ApiApp:
                     elif method == "POST" and path == "/api/v1/me/ecp-requests":
                         response = self._create_member_ecp_request(context, body, request_id)
                     else:
-                        club_members_id = self._match_club_members_path(method, path)
-                        if club_members_id is not None:
-                            response = self._list_club_members(club_members_id, query, context)
+                        member_id = self._match_member_path(method, path)
+                        if member_id is not None:
+                            response = self._update_member_profile(member_id, context, body, request_id)
                         else:
-                            response = error_response(404, "not_found", "Endpoint not found.", request_id)
-                            error_code = "not_found"
+                            club_members_id = self._match_club_members_path(method, path)
+                            if club_members_id is not None:
+                                response = self._list_club_members(club_members_id, query, context)
+                            else:
+                                response = error_response(404, "not_found", "Endpoint not found.", request_id)
+                                error_code = "not_found"
         except AuthError as exc:
             error_code = exc.code
             response = error_response(exc.status_code, exc.code, exc.message, request_id)
@@ -135,6 +142,8 @@ class ApiApp:
             return "/api/v1/me"
         if method == "POST" and path == "/api/v1/me/ecp-requests":
             return "/api/v1/me/ecp-requests"
+        if self._match_member_path(method, path) is not None:
+            return "/api/v1/members/{member_id}"
         if self._match_club_members_path(method, path) is not None:
             return "/api/v1/clubs/{club_id}/members"
         if self._match_ecp_verify_path(method, path) is not None:
@@ -222,6 +231,63 @@ class ApiApp:
             },
         )
 
+    def _update_member_profile(self, member_id: int, context, body: str, request_id: str) -> ApiResponse:
+        require_any_role(context, {"admin", "club_president"})
+        if not context.has_role("admin") and not self.repository.member_belongs_to_any_club(member_id, context.club_ids):
+            raise AuthError(403, "forbidden", "Authenticated caller is not allowed to access this member.")
+        try:
+            payload = json.loads(body or "{}")
+        except json.JSONDecodeError:
+            return error_response(400, "invalid_json", "Request body must be valid JSON.", request_id)
+        if not isinstance(payload, dict):
+            return error_response(422, "invalid_request_body", "Request body must be a JSON object.", request_id)
+
+        field_map = {
+            "status": "member_status",
+            "titlePrefix": "title_prefix",
+            "firstName": "first_name",
+            "lastName": "last_name",
+            "titleSuffix": "title_suffix",
+            "email": "email",
+            "phone": "phone",
+            "discountedMembership": "discounted_membership",
+        }
+        allowed_statuses = {"applicant", "active", "inactive", "blocked"}
+        changes = {}
+        for api_field, raw_value in payload.items():
+            if api_field not in field_map:
+                return error_response(
+                    422,
+                    "unknown_member_update_field",
+                    f"Field '{api_field}' cannot be updated through this endpoint.",
+                    request_id,
+                )
+            db_field = field_map[api_field]
+            if db_field == "discounted_membership":
+                if not isinstance(raw_value, bool):
+                    return error_response(422, "invalid_member_update_value", "discountedMembership must be boolean.", request_id)
+                changes[db_field] = raw_value
+                continue
+
+            value = "" if raw_value is None else str(raw_value).strip()
+            if db_field == "member_status":
+                if value not in allowed_statuses:
+                    return error_response(422, "invalid_member_status", "Unsupported member status.", request_id)
+            elif db_field in {"first_name", "last_name"} and not value:
+                return error_response(422, "invalid_member_name", "firstName and lastName cannot be empty.", request_id)
+            changes[db_field] = value
+
+        if not changes:
+            return error_response(422, "no_update_fields", "At least one member field is required.", request_id)
+
+        try:
+            member = self.repository.update_member_profile(member_id, changes)
+        except ValueError:
+            return error_response(422, "unknown_member_update_field", "Request contains unsupported member fields.", request_id)
+        if not member:
+            return error_response(404, "member_not_found", "Member was not found.", request_id)
+        return json_response(200, member_to_api(member))
+
     def _list_club_members(self, club_id: int, query: dict, context) -> ApiResponse:
         require_any_role(context, {"admin", "club_president"})
         if not context.has_role("admin") and club_id not in context.club_ids:
@@ -251,6 +317,20 @@ class ApiApp:
         if not path.startswith(prefix) or not path.endswith(suffix):
             return None
         raw_id = path[len(prefix):-len(suffix)]
+        try:
+            return int(raw_id)
+        except ValueError:
+            return None
+
+    def _match_member_path(self, method: str, path: str) -> int | None:
+        if method != "PATCH":
+            return None
+        prefix = "/api/v1/members/"
+        if not path.startswith(prefix):
+            return None
+        raw_id = path[len(prefix):].strip("/")
+        if not raw_id or "/" in raw_id:
+            return None
         try:
             return int(raw_id)
         except ValueError:

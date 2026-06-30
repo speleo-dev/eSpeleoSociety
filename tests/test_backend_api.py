@@ -19,6 +19,8 @@ class ClubRepository:
         self.list_calls = []
         self.member_list_calls = []
         self.profile_calls = []
+        self.membership_checks = []
+        self.updated_member_profiles = []
         self.created_ecp_requests = []
         self.reject_duplicate_ecp_request = False
         self.clubs = [
@@ -65,7 +67,21 @@ class ClubRepository:
                     ecp_hash="ecp-1",
                 )
             ],
-            2: [],
+            2: [
+                SimpleNamespace(
+                    member_id=201,
+                    status="active",
+                    title_prefix="",
+                    first_name="Grace",
+                    last_name="Hopper",
+                    title_suffix="",
+                    email="grace@example.sk",
+                    phone="0902",
+                    primary_club_id=2,
+                    is_president=True,
+                    ecp_hash="ecp-2",
+                )
+            ],
         }
         self.ecp_verifications = {
             "token-123456789": {
@@ -151,6 +167,34 @@ class ClubRepository:
         page = items[:limit]
         next_cursor = "next-member-cursor" if len(items) > limit else None
         return page, next_cursor
+
+    def member_belongs_to_any_club(self, member_id: int, club_ids):
+        club_ids = set(club_ids)
+        self.membership_checks.append({
+            "member_id": member_id,
+            "club_ids": club_ids,
+        })
+        return any(
+            member.member_id == member_id and club_id in club_ids
+            for club_id, members in self.members_by_club.items()
+            for member in members
+        )
+
+    def update_member_profile(self, member_id: int, changes: dict):
+        self.updated_member_profiles.append({
+            "member_id": member_id,
+            "changes": dict(changes),
+        })
+        for members in self.members_by_club.values():
+            for member in members:
+                if member.member_id == member_id:
+                    for key, value in changes.items():
+                        if key == "member_status":
+                            member.status = value
+                        elif hasattr(member, key):
+                            setattr(member, key, value)
+                    return member
+        return None
 
     def fetch_member_portal_profile(self, member_id: int):
         self.profile_calls.append(member_id)
@@ -271,6 +315,85 @@ class BackendApiTest(unittest.TestCase):
         }])
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(json.loads(denied.body)["error"]["code"], "forbidden")
+
+    def test_admin_can_patch_member_profile(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, roles=["admin"])
+        repository = ClubRepository()
+        audit_sink = AuditSink()
+        app = ApiApp(repository=repository, jwt_secret=secret, audit_sink=audit_sink)
+
+        response = app.handle_request(
+            "PATCH",
+            "/api/v1/members/101",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({
+                "firstName": "Augusta",
+                "status": "inactive",
+                "phone": "0909",
+                "discountedMembership": True,
+            }),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["firstName"], "Augusta")
+        self.assertEqual(payload["status"], "inactive")
+        self.assertEqual(payload["phone"], "0909")
+        self.assertEqual(repository.updated_member_profiles, [{
+            "member_id": 101,
+            "changes": {
+                "first_name": "Augusta",
+                "member_status": "inactive",
+                "phone": "0909",
+                "discounted_membership": True,
+            },
+        }])
+        self.assertEqual(audit_sink.events[0].route, "/api/v1/members/{member_id}")
+
+    def test_club_president_can_patch_only_own_club_member(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, sub="president-1", roles=["club_president"], club_ids=[1])
+        repository = ClubRepository()
+        app = ApiApp(repository=repository, jwt_secret=secret)
+
+        allowed = app.handle_request(
+            "PATCH",
+            "/api/v1/members/101",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({"email": "ada.new@example.sk"}),
+        )
+        denied = app.handle_request(
+            "PATCH",
+            "/api/v1/members/201",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({"email": "grace.new@example.sk"}),
+        )
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(json.loads(allowed.body)["email"], "ada.new@example.sk")
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(json.loads(denied.body)["error"]["code"], "forbidden")
+        self.assertEqual(repository.membership_checks, [
+            {"member_id": 101, "club_ids": {1}},
+            {"member_id": 201, "club_ids": {1}},
+        ])
+        self.assertEqual(len(repository.updated_member_profiles), 1)
+
+    def test_patch_member_rejects_unknown_fields(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, roles=["admin"])
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret)
+
+        response = app.handle_request(
+            "PATCH",
+            "/api/v1/members/101",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            body=json.dumps({"ecpHash": "must-not-be-writable"}),
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "unknown_member_update_field")
 
     def test_member_can_fetch_own_portal_profile(self):
         secret = "unit-test-secret"

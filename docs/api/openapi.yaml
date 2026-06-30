@@ -88,6 +88,39 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /members/{memberId}:
+    patch:
+      summary: Update an administrative member profile slice
+      description: Requires role `admin`, or `club_president` when the target member belongs to one of the caller's `club_ids`. The endpoint intentionally excludes birth date, address, eCP hashes, and portrait fields.
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberUpdate"
+      responses:
+        "200":
+          description: Updated member summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
   /me:
     get:
       summary: Get own member portal profile
@@ -282,6 +315,30 @@ components:
         isPresident:
           type: boolean
         hasEcp:
+          type: boolean
+    MemberUpdate:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [applicant, active, inactive, blocked]
+        titlePrefix:
+          type: string
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        titleSuffix:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        discountedMembership:
           type: boolean
     MemberProfile:
       type: object
