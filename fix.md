@@ -489,3 +489,25 @@ After the signed eCP QR issuance and metadata persistence wiring:
   - implement OAuth2 Authorization Code + PKCE login for desktop and portal,
   - add backend endpoints for member create, club affiliation/role changes, fees, eCP approval/revocation, SEPA imports,
   - add idempotency keys and a dedicated API audit table.
+## Fast Member Search Default List
+
+- Changed `Find Member` so the view no longer starts as an empty, apparently broken screen.
+- Added a lazy member search directory load when the view is first shown:
+  - one DB query loads all members needed for search,
+  - one club query builds a local club cache,
+  - no per-row club lookup is performed while rendering the list.
+- Added `DatabaseManager.fetch_member_search_directory()` as a lightweight read model:
+  - includes basic member identity, contact, status, eCP hash, primary club id/name, current-year fee flag, portrait metadata, and directory-stub flag,
+  - intentionally does not select `birth_date_encrypted` or address fields, so opening member search does not decrypt unnecessary personal data,
+  - joins the primary club through `LEFT JOIN LATERAL`.
+- Added local fast prefix filtering:
+  - typing `D` matches first or last names starting with `D`,
+  - diacritics are normalized, so `D` also matches names such as `Ďurica`,
+  - multi-token searches such as `jan du` and `du jan` work by first/last-name prefixes.
+- The table renders at most 300 rows at once and shows a status line such as `Showing 300 of 900 members. Type more letters to narrow the list.`
+- Removed disruptive "no members found" popup during typing; no-result feedback is shown inline.
+- Added tests for:
+  - search text normalization,
+  - first/last-name prefix matching,
+  - lightweight DB search directory query and mapping.
+- Hardened `get_state_pixmap()` for `blocked` member status so the default list cannot crash on a blocked member.

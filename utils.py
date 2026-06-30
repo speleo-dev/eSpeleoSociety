@@ -396,6 +396,7 @@ def get_state_pixmap(member: 'Member', club: 'Club') -> QPixmap:
     IMAGE_SIZE = 20 # Renamed constant, Enlarged for better visibility, originally 16 in main_window legend
 
     image_files = []
+    icon_filename = "caver_black.png"
 
 
     if member.primary_club_id != club.club_id:
@@ -408,13 +409,15 @@ def get_state_pixmap(member: 'Member', club: 'Club') -> QPixmap:
             icon_filename = "caver_gray_inv.png"
         elif member_status == "applicant":
             icon_filename = "caver_gray_dark.png"
+        elif member_status in ("blocked", "zblocked"):
+            icon_filename = "caver_baned.png"
     
     if club.president_id is not None \
         and member.member_id == club.president_id \
         and member.primary_club_id == club.club_id: # President of their primary club, assuming translated attributes
         icon_filename = "caver_gold.png"
     
-    if member.status == "zblocked": # Blocked has priority, assuming translated attribute
+    if member.status in ("blocked", "zblocked"): # Blocked has priority, assuming translated attribute
         icon_filename = "caver_baned.png"
 
     if member.status is None: # Assuming translated attribute
