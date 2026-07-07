@@ -4,6 +4,7 @@ from datetime import date, datetime
 import hashlib
 from io import BytesIO
 import json
+from pathlib import Path
 import secrets
 from typing import Callable
 
@@ -45,7 +46,7 @@ class IssuedSignedEcpQr:
 @dataclass(frozen=True)
 class IssuedEcpDeliveryBundle:
     issued_qr: IssuedSignedEcpQr
-    qr_url: str
+    qr_url: str | None
     verification_url: str
     verification_blob_name: str
     card_image: bytes
@@ -163,7 +164,12 @@ def issue_and_upload_signed_ecp_qr(
     valid_until: date | None = None,
     paid_year: int | None = None,
     issued_at: datetime | None = None,
-) -> tuple[IssuedSignedEcpQr, str]:
+) -> tuple[IssuedSignedEcpQr, str | None]:
+    """Issue a signed payload without uploading a standalone QR PNG.
+
+    Google Wallet renders the QR natively from barcode.value. The generated PNG
+    remains available on IssuedSignedEcpQr for JPG/PDF card rendering only.
+    """
     signing_config = load_ecp_signing_config(get_secret)
     if valid_until is None:
         valid_until = calculate_ecp_valid_until(issued_at)
@@ -180,15 +186,34 @@ def issue_and_upload_signed_ecp_qr(
         issued_at=issued_at,
         ecp_hash=ecp_hash,
     )
-    qr_url = upload_blob(issued_qr.blob_name, issued_qr.qr_png, "image/png")
-    if not qr_url:
-        raise EcpQrUploadError("Signed eCP QR upload failed.")
-    return issued_qr, qr_url
+    return issued_qr, None
 
 
-def _verification_blob_name(ecp_hash: str, token: str | None = None) -> str:
+def _verification_blob_name(ecp_hash: str, token: str | None = None, path_prefix: str = "ecp_verify") -> str:
     token = token or secrets.token_urlsafe(24)
-    return f"ecp_verify/{token}.html"
+    return f"{path_prefix.strip('/')}/{token}.html"
+
+
+def _verification_url(bucket_name: str, blob_name: str, public_base_url: str | None = None) -> str:
+    if public_base_url:
+        token_name = blob_name.rsplit("/", 1)[-1].removesuffix(".html")
+        return f"{public_base_url.rstrip('/')}/{token_name}"
+    return public_gcs_url(bucket_name, blob_name)
+
+
+def _write_verification_html_to_webroot(webroot: str, blob_name: str, content: bytes) -> str:
+    root = Path(webroot).expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    root = root.resolve()
+    target = (root / blob_name).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise EcpQrUploadError("eCP verification page path escapes configured webroot.") from exc
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+    return str(target)
 
 
 def issue_and_upload_ecp_delivery_bundle(
@@ -208,8 +233,10 @@ def issue_and_upload_ecp_delivery_bundle(
     if not bucket_name:
         raise EcpSigningConfigError("Missing bucket_name secret for eCP verification page URL.")
 
-    verification_blob_name = _verification_blob_name(ecp_hash)
-    verification_url = public_gcs_url(bucket_name, verification_blob_name)
+    public_verification_base_url = (get_secret("ecp_verification_base_url") or "").strip()
+    verification_path_prefix = "v" if public_verification_base_url else "ecp_verify"
+    verification_blob_name = _verification_blob_name(ecp_hash, path_prefix=verification_path_prefix)
+    verification_url = _verification_url(bucket_name, verification_blob_name, public_verification_base_url)
     legal_documents = default_legal_documents()
     if legal_document_url != DEFAULT_LEGAL_DOCUMENT_URL:
         legal_documents = [{
@@ -236,9 +263,7 @@ def issue_and_upload_ecp_delivery_bundle(
         legal_documents=legal_documents,
     )
 
-    qr_url = upload_blob(issued_qr.blob_name, issued_qr.qr_png, "image/png")
-    if not qr_url:
-        raise EcpQrUploadError("Signed eCP QR upload failed.")
+    qr_url = None
 
     card_image, card_pdf = build_ecp_card_assets(
         member=member,
@@ -265,11 +290,19 @@ def issue_and_upload_ecp_delivery_bundle(
         portrait_url=portrait_url,
         legal_document_url=legal_document_url,
     )
-    uploaded_verification_url = upload_blob(
-        verification_blob_name,
-        verification_html,
-        "text/html; charset=utf-8",
-    )
+    verification_webroot = (get_secret("ecp_verification_webroot") or "").strip()
+    if verification_webroot:
+        uploaded_verification_url = _write_verification_html_to_webroot(
+            verification_webroot,
+            verification_blob_name,
+            verification_html,
+        )
+    else:
+        uploaded_verification_url = upload_blob(
+            verification_blob_name,
+            verification_html,
+            "text/html; charset=utf-8",
+        )
     if not uploaded_verification_url:
         raise EcpQrUploadError("eCP verification page upload failed.")
 

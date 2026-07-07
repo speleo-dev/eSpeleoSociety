@@ -14,6 +14,8 @@ class SetupSecretsTest(unittest.TestCase):
 
         expected_fields = [
             "google_wallet_issuer_id",
+            "ecp_verification_base_url",
+            "ecp_verification_webroot",
             "smtp_server",
             "smtp_port",
             "smtp_user",

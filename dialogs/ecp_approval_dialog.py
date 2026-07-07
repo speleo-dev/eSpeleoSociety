@@ -119,6 +119,7 @@ class ECPApprovalDialog(QDialog):
         # self.req_details.approved_ecp_hash = new_generated_ecp_hash # This attribute no longer exists in the EcpRequest model
         self.req_details.status = "approved"
         self.req_details.signed_qr_payload = delivery_bundle.issued_qr.payload
+        self.req_details.signed_qr_data = delivery_bundle.issued_qr.qr_data
         self.req_details.signed_qr_url = delivery_bundle.qr_url
 
         send_to_google_wallet(self.req_details) # Placeholder
