@@ -481,6 +481,14 @@ class MemberManagementDialog(QDialog):
         self.chk_fee_paid.setChecked(self.original_member.has_paid_fee())
         self.chk_discounted.setChecked(self.original_member.discounted_membership)
         self.chk_is_president.setChecked(self.original_member.member_id == self.club.president_id)
+
+        # Discard any not-yet-saved portrait upload, otherwise it would still
+        # get uploaded on the next Save even though the user cancelled it.
+        self.pending_portrait_result = None
+        self.portrait_preview.setPixmap(QPixmap())
+        self.portrait_preview.setText(self.tr("No Portrait"))
+        self.load_existing_portrait_preview()
+
         self.lock_fields()
         # self.accept() # Usually cancel doesn't auto-close, but depends on desired UX
 
