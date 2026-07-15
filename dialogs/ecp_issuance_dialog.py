@@ -167,7 +167,8 @@ class ECPIssuanceDialog(QDialog):
         self.member.ecp_hash = new_ecp_hash # Assuming translated attribute
         check_hash_val = utils.create_check_hash()
         # Assuming Ecp constructor uses translated attribute names
-        ecp_obj = Ecp(ecp_hash=self.member.ecp_hash, gdpr_consent=True, notifications_enabled=True,
+        ecp_obj = Ecp(ecp_hash=self.member.ecp_hash, gdpr_consent=True,
+                      notifications_enabled=self.chk_notifications.isChecked(),
                       photo_hash=photo_hash_val, is_ecp_active=False,
                       check_hash=check_hash_val, member_id=self.member.member_id)
         ecp_record_id = db.db_manager.insert_ecp(ecp_obj) # Example: inserting ECP record
