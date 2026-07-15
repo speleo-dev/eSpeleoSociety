@@ -97,6 +97,24 @@ class BackendAuthTest(unittest.TestCase):
 
         self.assertEqual(context.roles, frozenset({"admin"}))
 
+    def test_jwks_verifier_rejects_hmac_algorithm_to_prevent_confusion_attack(self):
+        with self.assertRaises(ValueError):
+            JwtBearerVerifier(
+                jwks_client=FakeJwksClient(b"public-key-bytes"),
+                audience="espeleo-api",
+                issuer="espeleo-test",
+                algorithms=["HS256"],
+            )
+
+    def test_secret_verifier_rejects_asymmetric_algorithm(self):
+        with self.assertRaises(ValueError):
+            JwtBearerVerifier(
+                jwt_secret="unit-test-secret",
+                audience="espeleo-api",
+                issuer="espeleo-test",
+                algorithms=["RS256"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
