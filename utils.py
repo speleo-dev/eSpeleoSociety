@@ -96,7 +96,7 @@ def load_logo():
         print("Error loading logo:", e)
         return None
 
-def delete_photo_from_bucket(photo_hash: str):
+def delete_photo_from_bucket(photo_hash: str) -> bool:
     # Set environment variable for authentication
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_manager.get_secret("credentials_json")
 
@@ -108,8 +108,10 @@ def delete_photo_from_bucket(photo_hash: str):
     try:
         blob.delete()
         print(f"Subor '{photo_hash}.png' bol odstraneny z bucketu '{secret_manager.get_secret("bucket_name")}'.")
+        return True
     except Exception as e:
         print("Chyba pri mazaní fotografie z bucketu:", e)
+        return False
 
 def upload_photo_to_bucket(photo_hash: str, image_data):
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_manager.get_secret("credentials_json")

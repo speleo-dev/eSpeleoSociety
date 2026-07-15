@@ -149,13 +149,16 @@ class ECPApprovalDialog(QDialog):
             show_error_message(self.tr("Cannot reject: eCP record or photo hash is missing."))
             return
 
+        if not delete_photo_from_bucket(self.ecp_record.photo_hash):
+            show_error_message(self.tr("Cannot reject: failed to delete photo from storage. Please retry."))
+            return
+
         db.db_manager.update_ecp_request_status(self.req_details.request_id, "rejected")
         if self.ecp_record.ecp_id:
             db.db_manager.delete_ecp_record_by_id(self.ecp_record.ecp_id)
         else:
             db.db_manager.delete_ecp_record_by_photo_hash(self.ecp_record.photo_hash)
-        delete_photo_from_bucket(self.ecp_record.photo_hash)
-        
+
         # If the member previously had an ecp_hash that now becomes invalid by rejecting this request,
         # it might be appropriate to nullify it here. But if this is a new request, the member's ecp_hash should already be null.
         # To be safe, if the portal logic were different:

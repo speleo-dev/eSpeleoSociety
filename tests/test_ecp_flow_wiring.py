@@ -24,6 +24,18 @@ class EcpFlowWiringTest(unittest.TestCase):
         self.assertIn("signed_qr_data", approval_source)
         self.assertIn("delivery_bundle.issued_qr.qr_data", approval_source)
 
+    def test_reject_request_deletes_photo_before_db_records_and_checks_result(self):
+        approval_source = Path("dialogs/ecp_approval_dialog.py").read_text(encoding="utf-8")
+
+        photo_delete_index = approval_source.index("if not delete_photo_from_bucket(self.ecp_record.photo_hash):")
+        db_delete_index = approval_source.index("db.db_manager.delete_ecp_record_by_id(self.ecp_record.ecp_id)")
+
+        self.assertLess(
+            photo_delete_index,
+            db_delete_index,
+            "photo must be deleted from the bucket before the DB record, and only if it succeeded (audit #19)",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
