@@ -6,7 +6,7 @@ import uuid
 
 from backend.audit import AuditEvent
 from backend.auth import AuthError, authenticate_bearer, require_any_role
-from backend.pagination import paginate_items, parse_limit
+from backend.pagination import InvalidCursorError, paginate_items, parse_limit
 from backend.repository import DuplicatePendingEcpRequestError
 from backend.serializers import club_to_api, ecp_verification_to_api, member_profile_to_api, member_to_api
 
@@ -103,6 +103,9 @@ class ApiApp:
         except AuthError as exc:
             error_code = exc.code
             response = error_response(exc.status_code, exc.code, exc.message, request_id)
+        except InvalidCursorError:
+            error_code = "invalid_cursor"
+            response = error_response(400, "invalid_cursor", "Pagination cursor is invalid or corrupted.", request_id)
         self._record_audit_event(request_id, method, route, response, context, error_code)
         return response
 
