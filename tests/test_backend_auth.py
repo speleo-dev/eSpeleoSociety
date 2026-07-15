@@ -1,10 +1,11 @@
+import time
 import unittest
 from types import SimpleNamespace
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from backend.auth import JwtBearerVerifier, authenticate_bearer
+from backend.auth import AuthError, JwtBearerVerifier, authenticate_bearer
 
 
 class FakeJwksClient:
@@ -33,6 +34,7 @@ class BackendAuthTest(unittest.TestCase):
                 },
                 "clubs": ["7"],
                 "memberId": "42",
+                "exp": int(time.time()) + 3600,
             },
             private_key,
             algorithm="RS256",
@@ -64,6 +66,7 @@ class BackendAuthTest(unittest.TestCase):
                 "iss": "espeleo-test",
                 "roles": ["club_president"],
                 "club_ids": [3],
+                "exp": int(time.time()) + 3600,
             },
             "unit-test-secret",
             algorithm="HS256",
@@ -85,6 +88,7 @@ class BackendAuthTest(unittest.TestCase):
                 "aud": "espeleo-api",
                 "iss": "espeleo-test",
                 "roles": "admin",
+                "exp": int(time.time()) + 3600,
             },
             "unit-test-secret",
             algorithm="HS256",
@@ -96,6 +100,24 @@ class BackendAuthTest(unittest.TestCase):
         )
 
         self.assertEqual(context.roles, frozenset({"admin"}))
+
+    def test_token_without_exp_claim_is_rejected(self):
+        token = jwt.encode(
+            {
+                "sub": "dev-user-3",
+                "aud": "espeleo-api",
+                "iss": "espeleo-test",
+                "roles": ["admin"],
+            },
+            "unit-test-secret",
+            algorithm="HS256",
+        )
+
+        with self.assertRaises(AuthError):
+            authenticate_bearer(
+                {"Authorization": f"Bearer {token}"},
+                jwt_secret="unit-test-secret",
+            )
 
 
 if __name__ == "__main__":

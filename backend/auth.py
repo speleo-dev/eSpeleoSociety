@@ -58,6 +58,7 @@ class JwtBearerVerifier:
                 algorithms=list(self.algorithms),
                 audience=self.audience,
                 issuer=self.issuer,
+                options={"require": ["exp"]},
             )
         except Exception as exc:
             raise AuthError(401, "invalid_bearer_token", "Invalid OAuth2 bearer token.") from exc
