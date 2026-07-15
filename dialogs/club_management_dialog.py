@@ -314,7 +314,9 @@ class ClubManagementDialog(QDialog):
                 # was not found in self.members. This is unexpected if cb_president
                 # is populated correctly from self.members.
                 self.club.president_name = None # Fallback
-                print(f"Warning: President with ID {self.club.president_id} not found in self.members for club {self.club.name}. President name set to None.")
+                show_warning_message(
+                    self.tr(f"Selected president (ID {self.club.president_id}) was not found among club members. President name was not saved.")
+                )
         else:
             # No president was selected (president_id is None)
             self.club.president_name = None
