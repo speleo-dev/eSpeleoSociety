@@ -98,22 +98,24 @@ class ECPApprovalDialog(QDialog):
             show_error_message(self.tr(f"Cannot approve signed eCP QR: {exc}"))
             return
 
-        db.db_manager.update_ecp_record_issuance(
-            ecp_record_id=self.ecp_record.ecp_id,
-            ecp_hash=new_generated_ecp_hash,
-            qr_url=delivery_bundle.qr_url,
-            qr_key_id=delivery_bundle.issued_qr.key_id,
-            qr_payload=delivery_bundle.issued_qr.payload,
-            qr_payload_hash=delivery_bundle.issued_qr.payload_hash,
-            issued_at=delivery_bundle.issued_qr.issued_at,
-            valid_until=delivery_bundle.issued_qr.valid_until,
-            verification_url=delivery_bundle.verification_url,
-            card_image_url=delivery_bundle.card_image_url,
-            card_pdf_url=delivery_bundle.card_pdf_url,
-            legal_document_url=delivery_bundle.legal_document_url,
-        )
-        db.db_manager.update_member_ecp_hash(self.member.member_id, new_generated_ecp_hash)
-        db.db_manager.update_ecp_request_status(self.req_details.request_id, "approved")
+        with db.db_manager.transaction() as conn:
+            db.db_manager.update_ecp_record_issuance(
+                ecp_record_id=self.ecp_record.ecp_id,
+                ecp_hash=new_generated_ecp_hash,
+                qr_url=delivery_bundle.qr_url,
+                qr_key_id=delivery_bundle.issued_qr.key_id,
+                qr_payload=delivery_bundle.issued_qr.payload,
+                qr_payload_hash=delivery_bundle.issued_qr.payload_hash,
+                issued_at=delivery_bundle.issued_qr.issued_at,
+                valid_until=delivery_bundle.issued_qr.valid_until,
+                verification_url=delivery_bundle.verification_url,
+                card_image_url=delivery_bundle.card_image_url,
+                card_pdf_url=delivery_bundle.card_pdf_url,
+                legal_document_url=delivery_bundle.legal_document_url,
+                conn=conn,
+            )
+            db.db_manager.update_member_ecp_hash(self.member.member_id, new_generated_ecp_hash, conn=conn)
+            db.db_manager.update_ecp_request_status(self.req_details.request_id, "approved", conn=conn)
         
         # The ecp_hash attribute in self.req_details is the photo_hash and should not be changed to the final ECP hash.
         # self.req_details.approved_ecp_hash = new_generated_ecp_hash # This attribute no longer exists in the EcpRequest model

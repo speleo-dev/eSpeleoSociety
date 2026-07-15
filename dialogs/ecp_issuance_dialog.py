@@ -170,25 +170,30 @@ class ECPIssuanceDialog(QDialog):
         ecp_obj = Ecp(ecp_hash=self.member.ecp_hash, gdpr_consent=True, notifications_enabled=True,
                       photo_hash=photo_hash_val, is_ecp_active=False,
                       check_hash=check_hash_val, member_id=self.member.member_id)
-        ecp_record_id = db.db_manager.insert_ecp(ecp_obj) # Example: inserting ECP record
-        if not ecp_record_id:
-            show_error_message(self.tr("Cannot issue eCP: failed to create eCP record."))
+        try:
+            with db.db_manager.transaction() as conn:
+                ecp_record_id = db.db_manager.insert_ecp(ecp_obj, conn=conn)
+                if not ecp_record_id:
+                    raise ValueError("failed to create eCP record")
+                db.db_manager.update_ecp_record_issuance(
+                    ecp_record_id=ecp_record_id,
+                    ecp_hash=self.member.ecp_hash,
+                    qr_url=delivery_bundle.qr_url,
+                    qr_key_id=delivery_bundle.issued_qr.key_id,
+                    qr_payload=delivery_bundle.issued_qr.payload,
+                    qr_payload_hash=delivery_bundle.issued_qr.payload_hash,
+                    issued_at=delivery_bundle.issued_qr.issued_at,
+                    valid_until=delivery_bundle.issued_qr.valid_until,
+                    verification_url=delivery_bundle.verification_url,
+                    card_image_url=delivery_bundle.card_image_url,
+                    card_pdf_url=delivery_bundle.card_pdf_url,
+                    legal_document_url=delivery_bundle.legal_document_url,
+                    conn=conn,
+                )
+                db.db_manager.update_member_ecp_hash(self.member.member_id, self.member.ecp_hash, conn=conn)
+        except ValueError as exc:
+            show_error_message(self.tr(f"Cannot issue eCP: {exc}"))
             return
-        db.db_manager.update_ecp_record_issuance(
-            ecp_record_id=ecp_record_id,
-            ecp_hash=self.member.ecp_hash,
-            qr_url=delivery_bundle.qr_url,
-            qr_key_id=delivery_bundle.issued_qr.key_id,
-            qr_payload=delivery_bundle.issued_qr.payload,
-            qr_payload_hash=delivery_bundle.issued_qr.payload_hash,
-            issued_at=delivery_bundle.issued_qr.issued_at,
-            valid_until=delivery_bundle.issued_qr.valid_until,
-            verification_url=delivery_bundle.verification_url,
-            card_image_url=delivery_bundle.card_image_url,
-            card_pdf_url=delivery_bundle.card_pdf_url,
-            legal_document_url=delivery_bundle.legal_document_url,
-        )
-        db.db_manager.update_member_ecp_hash(self.member.member_id, self.member.ecp_hash)
         email_warning = None
         try:
             send_ecp_issued_email(
