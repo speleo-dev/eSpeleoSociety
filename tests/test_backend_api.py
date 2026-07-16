@@ -234,6 +234,11 @@ class AuditSink:
         self.events.append(event)
 
 
+class FailingAuditSink:
+    def record_api_audit_event(self, event):
+        raise RuntimeError("audit backend unavailable")
+
+
 def make_token(secret: str, **claims) -> str:
     payload = {
         "sub": "admin-1",
@@ -576,6 +581,15 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(audit_sink.events[0].route, "/api/v1/ecp/verify/{token}")
         self.assertNotIn("token-123456789", repr(audit_sink.events[0]))
         self.assertEqual(audit_sink.events[0].subject, "anonymous")
+
+    def test_audit_sink_failure_is_logged_not_silently_swallowed(self):
+        app = ApiApp(repository=ClubRepository(), jwt_secret="unit-test-secret", audit_sink=FailingAuditSink())
+
+        with self.assertLogs("backend.app", level="ERROR") as captured:
+            response = app.handle_request("GET", "/api/v1/health", headers={})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(any("audit event" in message for message in captured.output))
 
 
 if __name__ == "__main__":
