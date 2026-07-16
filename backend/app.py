@@ -33,6 +33,21 @@ def json_response(status_code: int, payload: dict) -> ApiResponse:
     )
 
 
+def _get_header(headers: dict, name: str) -> str | None:
+    """Case-insensitive header lookup.
+
+    The WSGI adapter (backend/wsgi.py) reconstructs header names with
+    str.title(), which turns "X-Request-ID" into "X-Request-Id" (title-casing
+    lowercases the "D" in the "ID" acronym). An exact-case or all-lowercase
+    match alone therefore misses real client-sent request IDs.
+    """
+    name_lower = name.lower()
+    for key, value in headers.items():
+        if key.lower() == name_lower:
+            return value
+    return None
+
+
 def error_response(status_code: int, code: str, message: str, request_id: str) -> ApiResponse:
     return json_response(
         status_code,
@@ -67,7 +82,7 @@ class ApiApp:
         headers = headers or {}
         query = query or {}
         body = body or ""
-        request_id = headers.get("X-Request-ID") or headers.get("x-request-id") or f"req_{uuid.uuid4().hex}"
+        request_id = _get_header(headers, "X-Request-ID") or f"req_{uuid.uuid4().hex}"
         context = None
         error_code = None
         route = self._route_template(method, path)
