@@ -6,7 +6,7 @@ from config import SecretManager
 
 
 class SecretManagerEncryptionTest(unittest.TestCase):
-    def test_encrypt_and_save_file_populates_secrets_so_caller_can_detect_success(self):
+    def test_encrypt_and_save_file_does_not_leave_plaintext_temp_file_on_disk(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             original_cwd = os.getcwd()
             os.chdir(tmp_dir)
@@ -15,7 +15,9 @@ class SecretManagerEncryptionTest(unittest.TestCase):
                 ok = manager.encrypt_and_save_file({"db_password": "s3cr3t"}, pin="1234")
 
                 self.assertTrue(ok)
-                self.assertEqual(manager.secrets, {"db_password": "s3cr3t"})
+                self.assertTrue(os.path.exists("secrets.properties"))
+                self.assertFalse(os.path.exists("temp.properties"))
+                self.assertEqual(sorted(os.listdir(tmp_dir)), ["secrets.properties"])
             finally:
                 os.chdir(original_cwd)
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import base64
 import binascii
 import json
+import logging
 import uuid
 
 from backend.audit import AuditEvent
@@ -10,6 +11,8 @@ from backend.pagination import paginate_items, parse_limit
 from backend.repository import DuplicatePendingEcpRequestError
 from backend.serializers import club_to_api, ecp_verification_to_api, member_profile_to_api, member_to_api
 
+
+logger = logging.getLogger(__name__)
 
 API_VERSION = "v1"
 MAX_ECP_REQUEST_PHOTO_BYTES = 5 * 1024 * 1024
@@ -131,7 +134,7 @@ class ApiApp:
         try:
             recorder(event)
         except Exception:
-            pass
+            logger.exception("Failed to record API audit event for request_id=%s", request_id)
 
     def _route_template(self, method: str, path: str) -> str:
         if method == "GET" and path == "/api/v1/health":

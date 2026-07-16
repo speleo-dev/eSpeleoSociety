@@ -1,4 +1,5 @@
 # config.py
+import io
 import os
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -74,13 +75,11 @@ class SecretManager:
             config = configparser.ConfigParser()
             config["DEFAULT"] = secrets
 
-            # Serialize configparser to string
-            config_string = ""
-            with open("temp.properties", "w") as configfile:
-                config.write(configfile)
-            with open("temp.properties", "r") as configfile:
-                config_string = configfile.read()
-            os.remove("temp.properties")
+            # Serialize configparser to an in-memory buffer so plaintext
+            # secrets are never written to disk unencrypted.
+            buffer = io.StringIO()
+            config.write(buffer)
+            config_string = buffer.getvalue()
 
             encrypted_data = self.encrypt(config_string.encode("utf-8"), key)
 
