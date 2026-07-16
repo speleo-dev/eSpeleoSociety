@@ -1,6 +1,6 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QStackedWidget, QDialog, QStatusBar
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QStackedWidget, QDialog, QStatusBar, QMessageBox
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import QCoreApplication, Qt, QTranslator, QLocale, QLibraryInfo
 from config import secret_manager, get_preferred_language
@@ -128,6 +128,18 @@ class MainWindow(QMainWindow):
         else:
             show_warning_message(QCoreApplication.translate("MainWindow", f"Club with ID {club_id} not found."))
 
+def init_database_or_show_error():
+    """Initialize db.db_manager; on failure, show a GUI error dialog and exit instead of crashing silently."""
+    try:
+        db.db_manager = db.DatabaseManager()
+    except Exception as e:
+        error_title = QCoreApplication.translate("Main", "Database connection failed")
+        error_message = QCoreApplication.translate(
+            "Main", "The application could not connect to the database and cannot continue.\n\nDetails:\n%1"
+        )
+        QMessageBox.critical(None, error_title, error_message.replace("%1", str(e)))
+        sys.exit(1)
+
 if __name__ == "__main__":
     # Aktivácia podpory pre High DPI scaling
     # This must be called before creating the QApplication
@@ -208,8 +220,8 @@ if __name__ == "__main__":
     load_all_configs()
 
     # DB Init
-    db.db_manager = db.DatabaseManager()
-    
+    init_database_or_show_error()
+
     window = MainWindow()
     window.showMaximized()
     sys.exit(app.exec_())

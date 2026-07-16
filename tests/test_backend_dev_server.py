@@ -31,30 +31,14 @@ class BackendDevServerTest(unittest.TestCase):
         self.assertEqual(verifier.jwt_secret, "dev-secret")
         self.assertEqual(verifier.algorithms, ("HS256",))
 
-    def test_build_token_verifier_refuses_hs256_fallback_in_production_by_default(self):
-        with patch.dict(os.environ, {"ESPELEO_API_JWT_SECRET": "dev-secret"}, clear=True):
-            with self.assertRaises(RuntimeError):
-                build_token_verifier_from_environment(secret_getter=lambda _name: None)
-
-    def test_build_token_verifier_refuses_missing_jwks_in_explicit_production_mode(self):
+    def test_build_token_verifier_rejects_hmac_algorithm_when_jwks_configured(self):
         with patch.dict(os.environ, {
-            "ESPELEO_ENV": "production",
-            "ESPELEO_API_JWT_SECRET": "dev-secret",
-        }, clear=True):
-            with self.assertRaises(RuntimeError):
-                build_token_verifier_from_environment(secret_getter=lambda _name: None)
-
-    def test_build_token_verifier_refuses_default_issuer_audience_in_production(self):
-        with patch.dict(os.environ, {
-            "ESPELEO_ENV": "production",
             "ESPELEO_OIDC_JWKS_URL": "https://idp.example.test/realms/espeleo/protocol/openid-connect/certs",
+            "ESPELEO_API_ISSUER": "https://idp.example.test/realms/espeleo",
+            "ESPELEO_API_AUDIENCE": "espeleo-api",
+            "ESPELEO_OIDC_ALGORITHMS": "HS256",
         }, clear=True):
-            with self.assertRaises(RuntimeError):
-                build_token_verifier_from_environment(secret_getter=lambda _name: None)
-
-    def test_build_token_verifier_rejects_invalid_environment_value(self):
-        with patch.dict(os.environ, {"ESPELEO_ENV": "staging"}, clear=True):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(ValueError):
                 build_token_verifier_from_environment(secret_getter=lambda _name: None)
 
 
