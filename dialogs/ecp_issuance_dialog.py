@@ -1,5 +1,5 @@
 # dialogs/ecp_issuance_dialog.py
-import os, hashlib, uuid, secrets
+import os, hashlib, secrets
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPushButton, QFileDialog, QHBoxLayout, 
     QListWidget, QInputDialog, QMessageBox, QCheckBox
@@ -144,7 +144,7 @@ class ECPIssuanceDialog(QDialog):
         visible_pixmap.save(buffer, "PNG")
         image_data = bytes(buffer.data())
         buffer.close()
-        photo_hash_val = hashlib.sha256(uuid.uuid4().bytes).hexdigest() # Renamed for clarity
+        photo_hash_val = hashlib.sha256(image_data).hexdigest()
         new_ecp_hash = secrets.token_hex(32)
         bucket_name = secret_manager.get_secret("bucket_name")
         ecp_photo_url = f"https://storage.googleapis.com/{bucket_name}/{photo_hash_val}.png" if bucket_name else getattr(self.member, "portrait_url", None)
