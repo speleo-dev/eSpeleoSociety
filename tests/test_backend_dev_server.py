@@ -21,7 +21,10 @@ class BackendDevServerTest(unittest.TestCase):
         self.assertEqual(verifier.algorithms, ("RS256", "ES256"))
 
     def test_build_token_verifier_keeps_hs256_fallback_for_dev(self):
-        with patch.dict(os.environ, {"ESPELEO_API_JWT_SECRET": "dev-secret"}, clear=True):
+        with patch.dict(os.environ, {
+            "ESPELEO_ENV": "development",
+            "ESPELEO_API_JWT_SECRET": "dev-secret",
+        }, clear=True):
             verifier = build_token_verifier_from_environment(secret_getter=lambda _name: None)
 
         self.assertIsNone(verifier.jwks_client)
