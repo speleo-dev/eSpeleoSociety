@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import jwt
 
 from backend.app import ApiApp
+from backend.pagination import InvalidCursorError
 from backend.repository import DuplicatePendingEcpRequestError
 
 
@@ -139,6 +140,8 @@ class ClubRepository:
             "cursor": cursor,
             "filter_text": filter_text,
         })
+        if cursor == "corrupted-cursor":
+            raise InvalidCursorError("Invalid pagination cursor")
         items = self.clubs
         if filter_text:
             items = [
@@ -294,6 +297,21 @@ class BackendApiTest(unittest.TestCase):
         self.assertEqual(audit_sink.events[0].status_code, 200)
         self.assertEqual(audit_sink.events[0].subject, "admin-1")
         self.assertEqual(audit_sink.events[0].roles, ("admin",))
+
+    def test_list_clubs_rejects_corrupted_cursor_instead_of_silently_resetting(self):
+        secret = "unit-test-secret"
+        token = make_token(secret, roles=["admin"])
+        app = ApiApp(repository=ClubRepository(), jwt_secret=secret)
+
+        response = app.handle_request(
+            "GET",
+            "/api/v1/clubs",
+            headers={"Authorization": f"Bearer {token}"},
+            query={"cursor": "corrupted-cursor"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "invalid_cursor")
 
     def test_club_president_can_list_members_only_for_assigned_club(self):
         secret = "unit-test-secret"

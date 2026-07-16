@@ -6,6 +6,10 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 
 
+class InvalidCursorError(ValueError):
+    """Raised when a pagination cursor is present but cannot be decoded."""
+
+
 def parse_limit(raw_value) -> int:
     if raw_value in (None, ""):
         return DEFAULT_LIMIT
@@ -29,8 +33,8 @@ def decode_cursor(cursor: str | None) -> int:
         payload = base64.urlsafe_b64decode((cursor + padding).encode("ascii"))
         decoded = json.loads(payload.decode("utf-8"))
         return max(0, int(decoded.get("offset", 0)))
-    except Exception:
-        return 0
+    except Exception as exc:
+        raise InvalidCursorError("Invalid pagination cursor") from exc
 
 
 def encode_id_cursor(last_id: int) -> str:
@@ -46,8 +50,8 @@ def decode_id_cursor(cursor: str | None) -> int:
         payload = base64.urlsafe_b64decode((cursor + padding).encode("ascii"))
         decoded = json.loads(payload.decode("utf-8"))
         return max(0, int(decoded.get("lastId", 0)))
-    except Exception:
-        return 0
+    except Exception as exc:
+        raise InvalidCursorError("Invalid pagination cursor") from exc
 
 
 def encode_keyset_cursor(values: dict) -> str:
@@ -64,8 +68,8 @@ def decode_keyset_cursor(cursor: str | None) -> dict:
         decoded = json.loads(payload.decode("utf-8"))
         keyset = decoded.get("keyset", {})
         return keyset if isinstance(keyset, dict) else {}
-    except Exception:
-        return {}
+    except Exception as exc:
+        raise InvalidCursorError("Invalid pagination cursor") from exc
 
 
 def paginate_items(items: list, limit: int, cursor: str | None) -> tuple[list, str | None]:
