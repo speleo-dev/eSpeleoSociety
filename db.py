@@ -1,6 +1,7 @@
 import psycopg2
 import psycopg2.extras
 import re
+from contextlib import contextmanager
 from config import secret_manager
 from typing import List
 from model import Club, Membership, Ecp, EcpRequest, Member # EcpRequest model might need photo_hash
@@ -80,6 +81,25 @@ class DatabaseManager:
     def get_connection(self):
         return psycopg2.connect(**self.connection_params)
 
+    @contextmanager
+    def transaction(self):
+        """Open one connection shared across multiple write operations.
+
+        Callers pass the yielded connection into methods that accept an
+        optional `conn` argument (e.g. insert_ecp, update_ecp_record_issuance)
+        so several statements commit or roll back together instead of each
+        opening/committing its own connection.
+        """
+        conn = self.get_connection()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     # ----- Logging -----
     def _ensure_log_table_exists(self):
         query = """
@@ -111,23 +131,35 @@ class DatabaseManager:
                 conn.commit()
 
     # ----- Low-level helper methods -----
-    def _fetch_all(self, query, params=None):
-        with self.get_connection() as conn:
+    def _fetch_all(self, query, params=None, conn=None):
+        if conn is not None:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                 cur.execute(query, params)
                 return cur.fetchall()
+        with self.get_connection() as owned_conn:
+            with owned_conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(query, params)
+                return cur.fetchall()
 
-    def _fetch_one(self, query, params=None):
-        with self.get_connection() as conn:
+    def _fetch_one(self, query, params=None, conn=None):
+        if conn is not None:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                 cur.execute(query, params)
                 return cur.fetchone()
+        with self.get_connection() as owned_conn:
+            with owned_conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(query, params)
+                return cur.fetchone()
 
-    def _execute(self, query, params=None):
-        with self.get_connection() as conn:
+    def _execute(self, query, params=None, conn=None):
+        if conn is not None:
             with conn.cursor() as cur:
                 cur.execute(query, params)
-                conn.commit()
+            return
+        with self.get_connection() as owned_conn:
+            with owned_conn.cursor() as cur:
+                cur.execute(query, params)
+                owned_conn.commit()
 
     # ----- Read operations (specific methods) -----
     def fetch_clubs(self) -> List[Club]:
@@ -1057,7 +1089,7 @@ class DatabaseManager:
         self._execute(query, params)
         self._log_action("INSERT", "membership_fees", f"Inserted fee record for member ID {member_id} for year {year}")
 
-    def insert_ecp(self, ecp: Ecp):
+    def insert_ecp(self, ecp: Ecp, conn=None):
         query = """
         INSERT INTO ecp_records (ecp_hash, gdpr_consent, notifications_enabled, photo_hash, ecp_active, check_hash)
         VALUES (%s, %s, %s, %s, %s, %s)
@@ -1072,7 +1104,7 @@ class DatabaseManager:
             ecp.check_hash
             # ecp.member_id -- Removed as per requirement
         )
-        row = self._fetch_one(query, params)
+        row = self._fetch_one(query, params, conn=conn)
         if row:
             ecp.ecp_id = row[0]
             self._log_action("INSERT", "ecp_records", f"Inserted eCP record for member ID {ecp.member_id}")
@@ -1110,6 +1142,7 @@ class DatabaseManager:
         card_image_url: str | None = None,
         card_pdf_url: str | None = None,
         legal_document_url: str | None = None,
+        conn=None,
     ):
         query = """
         UPDATE ecp_records
@@ -1144,16 +1177,16 @@ class DatabaseManager:
             legal_document_url,
             ecp_record_id,
         )
-        self._execute(query, params)
+        self._execute(query, params, conn=conn)
         self._log_action("UPDATE", "ecp_records", "Updated eCP issuance metadata")
 
-    def update_member_ecp_hash(self, member_id: int, new_generated_ecp_hash: str):
+    def update_member_ecp_hash(self, member_id: int, new_generated_ecp_hash: str, conn=None):
         query = """
         UPDATE members
         SET ecp_hash = %s
         WHERE member_id = %s;
         """
-        self._execute(query, (new_generated_ecp_hash, member_id))
+        self._execute(query, (new_generated_ecp_hash, member_id), conn=conn)
         self._log_action("UPDATE", "members", f"Set eCP hash for member ID {member_id}")
     
     def delete_ecp_record(self, ecp_hash: str):
@@ -1169,10 +1202,10 @@ class DatabaseManager:
         self._execute(query, (member_id, ecp_record_id))
         self._log_action("INSERT", "ecp_requests", f"Inserted eCP request for member ID {member_id}")
 
-    def update_ecp_request_status(self, request_id: int, new_status: str):
+    def update_ecp_request_status(self, request_id: int, new_status: str, conn=None):
         query = "UPDATE ecp_requests SET status = %s WHERE request_id = %s;"
         params = (new_status, request_id)
-        self._execute(query, params)
+        self._execute(query, params, conn=conn)
         log_details = f"Updated eCP request ID {request_id} to status {new_status}"
         self._log_action("UPDATE", "ecp_requests", log_details)
 

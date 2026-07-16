@@ -8,37 +8,63 @@ from utils import create_check_hash
 
 
 class RecordingDatabaseManager(db.DatabaseManager):
-    def __init__(self, fetch_all_rows=None, fetch_one_row=None, fetch_one_rows=None):
+    def __init__(self, fetch_all_rows=None, fetch_one_row=None, fetch_one_rows=None, fake_connection=None):
         self.fetch_all_rows = fetch_all_rows or []
         self.fetch_one_row = fetch_one_row
         self.fetch_one_rows = list(fetch_one_rows) if fetch_one_rows is not None else None
         self.last_fetch_all_query = None
         self.last_fetch_all_params = None
         self.last_fetch_one_query = None
+        self.last_fetch_one_conn = None
         self.last_execute_query = None
         self.last_execute_params = None
         self.execute_queries = []
         self.execute_params = []
+        self.execute_conns = []
+        self.fake_connection = fake_connection
 
-    def _fetch_all(self, query, params=None):
+    def get_connection(self):
+        if self.fake_connection is not None:
+            return self.fake_connection
+        raise AssertionError("get_connection() should not be called directly in these tests")
+
+    def _fetch_all(self, query, params=None, conn=None):
         self.last_fetch_all_query = query
         self.last_fetch_all_params = params
         return self.fetch_all_rows
 
-    def _fetch_one(self, query, params=None):
+    def _fetch_one(self, query, params=None, conn=None):
         self.last_fetch_one_query = query
+        self.last_fetch_one_conn = conn
         if self.fetch_one_rows is not None:
             return self.fetch_one_rows.pop(0) if self.fetch_one_rows else None
         return self.fetch_one_row
 
-    def _execute(self, query, params=None):
+    def _execute(self, query, params=None, conn=None):
         self.last_execute_query = query
         self.last_execute_params = params
         self.execute_queries.append(query)
         self.execute_params.append(params)
+        self.execute_conns.append(conn)
 
     def _log_action(self, action, table_name, details, user=None):
         return None
+
+
+class FakeConnection:
+    def __init__(self):
+        self.committed = False
+        self.rolled_back = False
+        self.closed = False
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def close(self):
+        self.closed = True
 
 
 class DbQueryContractsTest(unittest.TestCase):
@@ -183,6 +209,82 @@ class DbQueryContractsTest(unittest.TestCase):
         self.assertEqual(manager.last_execute_params[10], "https://storage.example/ecp_cards/b.pdf")
         self.assertEqual(manager.last_execute_params[11], "https://sss.sk/wp-content/uploads/2026/06/vynimka.pdf")
         self.assertEqual(manager.last_execute_params[-1], 33)
+
+    def test_update_ecp_record_issuance_reuses_shared_connection_without_own_commit(self):
+        fake_connection = FakeConnection()
+        manager = RecordingDatabaseManager(fake_connection=fake_connection)
+
+        manager.update_ecp_record_issuance(
+            ecp_record_id=33,
+            ecp_hash="b" * 64,
+            qr_url=None,
+            qr_key_id="key-2026",
+            qr_payload={},
+            qr_payload_hash="c" * 64,
+            issued_at=datetime(2026, 6, 23, 12, 0),
+            valid_until=date(2027, 6, 23),
+            conn=fake_connection,
+        )
+
+        self.assertEqual(manager.execute_conns, [fake_connection])
+
+    def test_insert_ecp_reuses_shared_connection_without_own_commit(self):
+        fake_connection = FakeConnection()
+        manager = RecordingDatabaseManager(fake_connection=fake_connection, fetch_one_row=(88,))
+        ecp = Ecp(
+            ecp_hash="a" * 64,
+            gdpr_consent=True,
+            notifications_enabled=True,
+            photo_hash="photo-hash",
+            is_ecp_active=False,
+            member_id=22,
+            check_hash=create_check_hash(),
+        )
+
+        ecp_id = manager.insert_ecp(ecp, conn=fake_connection)
+
+        self.assertEqual(ecp_id, 88)
+        self.assertEqual(manager.last_fetch_one_conn, fake_connection)
+
+    def test_update_member_ecp_hash_reuses_shared_connection_without_own_commit(self):
+        fake_connection = FakeConnection()
+        manager = RecordingDatabaseManager(fake_connection=fake_connection)
+
+        manager.update_member_ecp_hash(22, "new-hash", conn=fake_connection)
+
+        self.assertEqual(manager.execute_conns, [fake_connection])
+
+    def test_update_ecp_request_status_reuses_shared_connection_without_own_commit(self):
+        fake_connection = FakeConnection()
+        manager = RecordingDatabaseManager(fake_connection=fake_connection)
+
+        manager.update_ecp_request_status(77, "approved", conn=fake_connection)
+
+        self.assertEqual(manager.execute_conns, [fake_connection])
+
+    def test_transaction_commits_and_closes_the_connection_on_success(self):
+        fake_connection = FakeConnection()
+        manager = RecordingDatabaseManager(fake_connection=fake_connection)
+
+        with manager.transaction() as conn:
+            self.assertIs(conn, fake_connection)
+            self.assertFalse(fake_connection.committed)
+
+        self.assertTrue(fake_connection.committed)
+        self.assertFalse(fake_connection.rolled_back)
+        self.assertTrue(fake_connection.closed)
+
+    def test_transaction_rolls_back_and_closes_the_connection_on_failure(self):
+        fake_connection = FakeConnection()
+        manager = RecordingDatabaseManager(fake_connection=fake_connection)
+
+        with self.assertRaises(ValueError):
+            with manager.transaction():
+                raise ValueError("boom")
+
+        self.assertFalse(fake_connection.committed)
+        self.assertTrue(fake_connection.rolled_back)
+        self.assertTrue(fake_connection.closed)
 
     def test_update_member_portrait_persists_portrait_metadata(self):
         manager = RecordingDatabaseManager()
