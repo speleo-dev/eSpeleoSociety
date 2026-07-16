@@ -6,6 +6,9 @@ import jwt
 DEFAULT_AUDIENCE = "espeleo-api"
 DEFAULT_ISSUER = "espeleo-test"
 
+_ASYMMETRIC_ALGORITHMS = ("RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512")
+_SYMMETRIC_ALGORITHMS = ("HS256", "HS384", "HS512")
+
 
 class AuthError(RuntimeError):
     def __init__(self, status_code: int, code: str, message: str):
@@ -42,10 +45,21 @@ class JwtBearerVerifier:
         self.jwks_client = jwks_client or (jwt.PyJWKClient(jwks_url) if jwks_url else None)
         if self.jwks_client:
             self.algorithms = tuple(algorithms or ("RS256",))
+            disallowed = [alg for alg in self.algorithms if alg not in _ASYMMETRIC_ALGORITHMS]
+            if disallowed:
+                raise ValueError(
+                    f"Algorithm(s) {disallowed} are not allowed with a JWKS (asymmetric) verifier. "
+                    f"This would enable an algorithm-confusion attack against the public key."
+                )
         else:
             if not jwt_secret:
                 raise ValueError("jwt_secret is required when JWKS is not configured.")
             self.algorithms = tuple(algorithms or ("HS256",))
+            disallowed = [alg for alg in self.algorithms if alg not in _SYMMETRIC_ALGORITHMS]
+            if disallowed:
+                raise ValueError(
+                    f"Algorithm(s) {disallowed} are not allowed with an HMAC secret verifier."
+                )
 
     def decode(self, token: str) -> dict:
         try:
