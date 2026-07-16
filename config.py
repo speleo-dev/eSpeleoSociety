@@ -89,6 +89,8 @@ class SecretManager:
 
             with open(self.properties_file, "wb") as f:
                 f.write(data_to_save)
+
+            self.secrets = dict(secrets)
             return True
         except Exception as e:
             print(f"Error encrypting and saving secrets: {e}")
