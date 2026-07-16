@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 import unittest
 from types import SimpleNamespace
 
@@ -238,6 +239,7 @@ def make_token(secret: str, **claims) -> str:
         "sub": "admin-1",
         "aud": "espeleo-api",
         "iss": "espeleo-test",
+        "exp": int(time.time()) + 3600,
         **claims,
     }
     return jwt.encode(payload, secret, algorithm="HS256")
