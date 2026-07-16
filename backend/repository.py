@@ -331,14 +331,7 @@ class DatabaseApiRepository:
             "pending_ecp_request_date": self._date_to_iso(row["pending_ecp_request_date"]),
         }
 
-    def create_member_ecp_request(
-        self,
-        member_id: int,
-        photo_bytes: bytes,
-        content_type: str,
-        gdpr_consent=True,
-        notifications_enabled=True,
-    ):
+    def _find_pending_ecp_request(self, member_id: int, conn=None):
         pending_row = self.db_manager._fetch_one(
             """
             SELECT request_id
@@ -348,10 +341,25 @@ class DatabaseApiRepository:
             LIMIT 1;
             """,
             (member_id,),
+            conn=conn,
         )
-        if pending_row:
-            request_id = pending_row["request_id"] if isinstance(pending_row, dict) else pending_row[0]
-            raise DuplicatePendingEcpRequestError(request_id)
+        if not pending_row:
+            return None
+        return pending_row["request_id"] if isinstance(pending_row, dict) else pending_row[0]
+
+    def create_member_ecp_request(
+        self,
+        member_id: int,
+        photo_bytes: bytes,
+        content_type: str,
+        gdpr_consent=True,
+        notifications_enabled=True,
+    ):
+        # Fast, non-authoritative check: avoids uploading a photo for the common
+        # case where the member obviously already has a pending request.
+        existing_request_id = self._find_pending_ecp_request(member_id)
+        if existing_request_id is not None:
+            raise DuplicatePendingEcpRequestError(existing_request_id)
         if not self.upload_blob:
             raise RuntimeError("Photo upload backend is not configured.")
         extension = ".png" if content_type == "image/png" else ".jpg"
@@ -359,38 +367,52 @@ class DatabaseApiRepository:
         blob_name = f"ecp_request_photos/{photo_hash}{extension}"
         photo_url = self.upload_blob(blob_name, photo_bytes, content_type)
         ecp_hash = secrets.token_hex(32)
-        ecp_row = self.db_manager._fetch_one(
-            """
-            INSERT INTO ecp_records (
-                ecp_hash,
-                gdpr_consent,
-                notifications_enabled,
-                photo_hash,
-                ecp_active,
-                check_hash
+
+        with self.db_manager.transaction() as conn:
+            # pg_advisory_xact_lock serializes concurrent requests for the same
+            # member for the lifetime of this transaction, so the re-check below
+            # and the inserts cannot race with a concurrent double-click/retry
+            # (audit #14 - TOCTOU).
+            self.db_manager._execute("SELECT pg_advisory_xact_lock(%s);", (member_id,), conn=conn)
+            existing_request_id = self._find_pending_ecp_request(member_id, conn=conn)
+            if existing_request_id is not None:
+                raise DuplicatePendingEcpRequestError(existing_request_id)
+
+            ecp_row = self.db_manager._fetch_one(
+                """
+                INSERT INTO ecp_records (
+                    ecp_hash,
+                    gdpr_consent,
+                    notifications_enabled,
+                    photo_hash,
+                    ecp_active,
+                    check_hash
+                )
+                VALUES (%s, %s, %s, %s, FALSE, %s)
+                RETURNING ecp_record_id;
+                """,
+                (
+                    ecp_hash,
+                    bool(gdpr_consent),
+                    bool(notifications_enabled),
+                    photo_hash,
+                    self.check_hash_factory(),
+                ),
+                conn=conn,
             )
-            VALUES (%s, %s, %s, %s, FALSE, %s)
-            RETURNING ecp_record_id;
-            """,
-            (
-                ecp_hash,
-                bool(gdpr_consent),
-                bool(notifications_enabled),
-                photo_hash,
-                self.check_hash_factory(),
-            ),
-        )
-        ecp_record_id = ecp_row["ecp_record_id"] if isinstance(ecp_row, dict) else ecp_row[0]
-        request_row = self.db_manager._fetch_one(
-            """
-            INSERT INTO ecp_requests (member_id, ecp_record_id, status, request_date)
-            VALUES (%s, %s, 'pending', CURRENT_DATE)
-            RETURNING request_id, request_date;
-            """,
-            (member_id, ecp_record_id),
-        )
-        request_id = request_row["request_id"] if isinstance(request_row, dict) else request_row[0]
-        request_date = request_row["request_date"] if isinstance(request_row, dict) else request_row[1]
+            ecp_record_id = ecp_row["ecp_record_id"] if isinstance(ecp_row, dict) else ecp_row[0]
+            request_row = self.db_manager._fetch_one(
+                """
+                INSERT INTO ecp_requests (member_id, ecp_record_id, status, request_date)
+                VALUES (%s, %s, 'pending', CURRENT_DATE)
+                RETURNING request_id, request_date;
+                """,
+                (member_id, ecp_record_id),
+                conn=conn,
+            )
+            request_id = request_row["request_id"] if isinstance(request_row, dict) else request_row[0]
+            request_date = request_row["request_date"] if isinstance(request_row, dict) else request_row[1]
+
         self.db_manager._log_action("INSERT", "ecp_requests", f"Inserted portal eCP request for member ID {member_id}")
         return {
             "request_id": request_id,

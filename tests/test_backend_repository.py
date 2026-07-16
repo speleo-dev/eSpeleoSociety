@@ -1,8 +1,25 @@
+from contextlib import contextmanager
 from datetime import date
 import unittest
 
 from backend.audit import AuditEvent
 from backend.repository import DatabaseApiRepository, DuplicatePendingEcpRequestError
+
+
+class FakeConnection:
+    def __init__(self):
+        self.committed = False
+        self.rolled_back = False
+        self.closed = False
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def close(self):
+        self.closed = True
 
 
 class FakeDbManager:
@@ -14,13 +31,14 @@ class FakeDbManager:
         self.last_params = None
         self.fetch_one_calls = []
         self.execute_calls = []
+        self.transaction_connections = []
 
-    def _fetch_all(self, query, params=None):
+    def _fetch_all(self, query, params=None, conn=None):
         self.last_query = query
         self.last_params = params
         return self.rows
 
-    def _fetch_one(self, query, params=None):
+    def _fetch_one(self, query, params=None, conn=None):
         self.last_query = query
         self.last_params = params
         self.fetch_one_calls.append((query, params))
@@ -34,10 +52,23 @@ class FakeDbManager:
         self.last_log_details = details
         self.last_log_user = user
 
-    def _execute(self, query, params=None):
+    def _execute(self, query, params=None, conn=None):
         self.last_query = query
         self.last_params = params
         self.execute_calls.append((query, params))
+
+    @contextmanager
+    def transaction(self):
+        conn = FakeConnection()
+        self.transaction_connections.append(conn)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 class BackendRepositoryTest(unittest.TestCase):
@@ -294,6 +325,7 @@ class BackendRepositoryTest(unittest.TestCase):
 
         fake_db = FakeDbManager(fetch_one_rows=[
             None,
+            None,
             {"ecp_record_id": 88},
             {"request_id": 77, "request_date": date(2026, 6, 29)},
         ])
@@ -316,9 +348,14 @@ class BackendRepositoryTest(unittest.TestCase):
         self.assertTrue(uploads[0][0].endswith(".jpg"))
         self.assertIn("SELECT request_id", fake_db.fetch_one_calls[0][0])
         self.assertIn("status = 'pending'", fake_db.fetch_one_calls[0][0])
-        self.assertIn("INSERT INTO ecp_records", fake_db.fetch_one_calls[1][0])
-        self.assertIn("INSERT INTO ecp_requests", fake_db.fetch_one_calls[2][0])
-        self.assertNotIn("photo_hash", fake_db.fetch_one_calls[2][0])
+        self.assertIn("SELECT request_id", fake_db.fetch_one_calls[1][0])
+        self.assertIn("INSERT INTO ecp_records", fake_db.fetch_one_calls[2][0])
+        self.assertIn("INSERT INTO ecp_requests", fake_db.fetch_one_calls[3][0])
+        self.assertNotIn("photo_hash", fake_db.fetch_one_calls[3][0])
+        self.assertEqual(len(fake_db.transaction_connections), 1)
+        self.assertTrue(fake_db.transaction_connections[0].committed)
+        self.assertIn("pg_advisory_xact_lock", fake_db.execute_calls[0][0])
+        self.assertEqual(fake_db.execute_calls[0][1], (101,))
 
     def test_create_member_ecp_request_rejects_existing_pending_before_upload(self):
         uploads = []
@@ -342,6 +379,38 @@ class BackendRepositoryTest(unittest.TestCase):
         self.assertEqual(uploads, [])
         self.assertEqual(len(fake_db.fetch_one_calls), 1)
         self.assertIn("SELECT request_id", fake_db.fetch_one_calls[0][0])
+        self.assertEqual(fake_db.transaction_connections, [])
+
+    def test_create_member_ecp_request_rejects_race_found_only_after_lock(self):
+        """Audit #14: a duplicate created between the fast pre-check and the
+        locked re-check must still be caught, and no records must be written."""
+        uploads = []
+
+        def upload_blob(blob_name, data, content_type):
+            uploads.append((blob_name, data, content_type))
+            return f"https://storage.example/{blob_name}"
+
+        fake_db = FakeDbManager(fetch_one_rows=[
+            None,
+            {"request_id": 66},
+        ])
+        repository = DatabaseApiRepository(fake_db, upload_blob=upload_blob, check_hash_factory=lambda: "check-1")
+
+        with self.assertRaises(DuplicatePendingEcpRequestError) as raised:
+            repository.create_member_ecp_request(
+                member_id=101,
+                photo_bytes=b"portrait",
+                content_type="image/jpeg",
+                gdpr_consent=True,
+            )
+
+        self.assertEqual(raised.exception.request_id, 66)
+        self.assertEqual(len(uploads), 1)
+        self.assertEqual(len(fake_db.fetch_one_calls), 2)
+        self.assertIn("pg_advisory_xact_lock", fake_db.execute_calls[0][0])
+        self.assertEqual(len(fake_db.transaction_connections), 1)
+        self.assertTrue(fake_db.transaction_connections[0].rolled_back)
+        self.assertFalse(fake_db.transaction_connections[0].committed)
 
     def test_record_api_audit_event_uses_db_log_without_raw_tokens(self):
         fake_db = FakeDbManager()
