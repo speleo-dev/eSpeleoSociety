@@ -6,8 +6,10 @@ import requests, os, binascii
 import qrcode
 import base64
 import xml.etree.ElementTree as ET
-from cryptography.hazmat.primitives import padding # Added import
+from cryptography.hazmat.primitives import padding, hashes # Added import
 from cryptography.hazmat.primitives.ciphers import algorithms
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.backends import default_backend
 from PyQt5.QtGui import QPixmap, QImage, QIcon, QPainter
 from PyQt5.QtCore import Qt, QTimer
 from datetime import date
@@ -107,7 +109,7 @@ def delete_photo_from_bucket(photo_hash: str) -> bool:
     blob = bucket.blob(f"{photo_hash}.png")
     try:
         blob.delete()
-        print(f"Subor '{photo_hash}.png' bol odstraneny z bucketu '{secret_manager.get_secret("bucket_name")}'.")
+        print(f"Subor '{photo_hash}.png' bol odstraneny z bucketu '{secret_manager.get_secret('bucket_name')}'.")
         return True
     except Exception as e:
         print("Chyba pri mazaní fotografie z bucketu:", e)
@@ -167,34 +169,57 @@ def load_image_from_url(url, max_size=(225, 330)):
 def decrypt_date(encrypted_hex):
     return _decrypt_data(encrypted_hex)
 
+def _derive_key_with_salt(password: str, salt: bytes) -> bytes:
+    """Derive AES key from password using PBKDF2 with salt."""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,  # 256-bit key for AES-256
+        salt=salt,
+        iterations=100000,  # OWASP recommended minimum
+        backend=default_backend()
+    )
+    return kdf.derive(password.encode('utf-8'))
+
+
 def _encrypt_data(data: str) -> str:
+    """Encrypt data with AES-256-CBC using PBKDF2 key derivation."""
     try:
-        # Use the first 16 bytes of the key for AES; the key must be the same as in the DB
+        if not data:
+            return None
+
         AES = _get_aes_module()
-        key_bytes = secret_manager.get_secret("crypt_key").encode('utf-8')[:16]
-        cipher = AES.new(key_bytes, AES.MODE_CBC)
-        iv = cipher.iv  # Use the generated IV
+        crypt_key = secret_manager.get_secret("crypt_key")
+        if not crypt_key:
+            raise ValueError("crypt_key not configured")
+
+        # Generate random salt and IV
+        salt = os.urandom(16)
+        iv = os.urandom(16)
+
+        # Derive key using PBKDF2
+        key_bytes = _derive_key_with_salt(crypt_key, salt)
+
+        cipher = AES.new(key_bytes, AES.MODE_CBC, iv=iv)
 
         padder = padding.PKCS7(algorithms.AES.block_size).padder()
         padded_data = padder.update(data.encode('utf-8')) + padder.finalize()
 
         ciphertext = cipher.encrypt(padded_data)
 
-        combined = iv + ciphertext
+        # Format: salt (16 bytes) + iv (16 bytes) + ciphertext
+        combined = salt + iv + ciphertext
         return binascii.hexlify(combined).decode('utf-8')
     except Exception as e:
         print(f"Error encrypting data: {e}")
         return None
 
 def _decrypt_data(encrypted_hex: str) -> str:
-    if not encrypted_hex: return None
+    """Decrypt data encrypted with _encrypt_data (AES-256-CBC with PBKDF2)."""
+    if not encrypted_hex:
+        return None
 
     if not isinstance(encrypted_hex, str):
         print(f"Warning: Expected a hex string for decryption, got: {type(encrypted_hex)}")
-        return None
-
-    if len(encrypted_hex) % 32 != 0:
-        print(f"Warning: Invalid hex string length for decryption, expected multiple of 32, got: {len(encrypted_hex)}")
         return None
 
     try:
@@ -202,12 +227,21 @@ def _decrypt_data(encrypted_hex: str) -> str:
         AES = _get_aes_module()
         encrypted_bytes = binascii.unhexlify(encrypted_hex)
 
-        # Separate IV (first 16 bytes)
-        iv = encrypted_bytes[:16]
-        ciphertext = encrypted_bytes[16:]
+        # New format: salt (16 bytes) + iv (16 bytes) + ciphertext
+        if len(encrypted_bytes) < 32:
+            print(f"Warning: Encrypted data too short: {len(encrypted_bytes)} bytes")
+            return None
 
-        # Use the first 16 bytes of the key; the key must be the same as in the DB
-        key_bytes = secret_manager.get_secret("crypt_key").encode('utf-8')[:16]
+        salt = encrypted_bytes[:16]
+        iv = encrypted_bytes[16:32]
+        ciphertext = encrypted_bytes[32:]
+
+        crypt_key = secret_manager.get_secret("crypt_key")
+        if not crypt_key:
+            raise ValueError("crypt_key not configured")
+
+        # Derive key using PBKDF2
+        key_bytes = _derive_key_with_salt(crypt_key, salt)
         cipher = AES.new(key_bytes, AES.MODE_CBC, iv=iv)
 
         decrypted_padded = cipher.decrypt(ciphertext)
@@ -217,7 +251,7 @@ def _decrypt_data(encrypted_hex: str) -> str:
         unpadded_data = unpadder.update(decrypted_padded) + unpadder.finalize()
         return unpadded_data.decode('utf-8')
     except (binascii.Error, ValueError, Exception) as e:
-        print(f"Decryption error for hex '{encrypted_hex}': {e}")
+        print(f"Decryption error: {e}")
         return None  # Return None if decoding fails
 
 def _encrypt_symmetric(plaintext: str) -> bytes:
