@@ -109,7 +109,7 @@ def delete_photo_from_bucket(photo_hash: str) -> bool:
     blob = bucket.blob(f"{photo_hash}.png")
     try:
         blob.delete()
-        print(f"Subor '{photo_hash}.png' bol odstraneny z bucketu '{secret_manager.get_secret("bucket_name")}'.")
+        print(f"Subor '{photo_hash}.png' bol odstraneny z bucketu '{secret_manager.get_secret('bucket_name')}'.")
         return True
     except Exception as e:
         print("Chyba pri mazaní fotografie z bucketu:", e)
