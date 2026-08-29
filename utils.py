@@ -10,12 +10,17 @@ from cryptography.hazmat.primitives import padding, hashes # Added import
 from cryptography.hazmat.primitives.ciphers import algorithms
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
-from PyQt5.QtGui import QPixmap, QImage, QIcon, QPainter
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QPixmap, QImage, QIcon, QPainter, QFont, QPen, QColor, QBrush, QPainterPath
+from PyQt5.QtCore import Qt, QTimer, QByteArray, QBuffer, QIODevice, QPoint
 from datetime import date
+import logging
+import random
+import colorsys
 from babel import Locale, UnknownLocaleError # Import for Babel
 from babel.core import localedata # Changed import
 from config import secret_manager
+from app_paths import ensure_config_dir, resolve_config_file
+from gcs_auth import resolve_gcs_credentials
 from PyQt5.QtWidgets import QMainWindow, QApplication # Added for type hinting, access to status_bar and QApplication
 from wallet_pass import build_wallet_barcode_from_request
 
@@ -23,7 +28,7 @@ if TYPE_CHECKING:
     from model import Member, Club
 
 
-CONFIG_FILE_PATH = 'config.properties'
+CONFIG_FILE_PATH = resolve_config_file('config.properties')
 SUPPORTED_LOCALES_FILE_PATH = os.path.join('translate', 'supported_locales.ini')
 
 _app_config_cache = None
@@ -48,22 +53,33 @@ def load_all_configs():
     global _app_config_cache, _supported_locales_cache
     
     # Load app config
-    _app_config_cache = configparser.ConfigParser()
+    _app_config_cache = configparser.ConfigParser(interpolation=None)
     if os.path.exists(CONFIG_FILE_PATH):
         _app_config_cache.read(CONFIG_FILE_PATH, encoding='utf-8')
     else:
         _app_config_cache['DEFAULT'] = {
-            'preferred_country': 'SK', # We store the country code
+            'preferred_country': 'SK',
             'preferred_language': 'en_US',
             'membership_currency': 'EUR',
             'membership_fee_normal': '20.00',
             'membership_fee_discounted': '10.00',
             'membership_valid_until_month': '12',
-            'membership_valid_until_day': '31',   # 31st
-            'membership_renewal_window_days': '90', # 90 days before expiry
-            'iban': '' # Default empty IBAN
+            'membership_valid_until_day': '31',
+            'membership_renewal_window_days': '90',
+            'iban': '',
+            'account_name': '',
+            'payment_link_generator': '',
+            'predefined_certificates': '',
+            'membership_sticker_template_path': '',
+            'membership_sticker_url': '',
+            'membership_sticker_text_color': '#FFFFFF',
+            'membership_sticker_bg_color': 'transparent',
+            'wallet_class_id_suffix': 'member',
+            'wallet_checker_url': '',
+            'wallet_origin_domain': '',
         }
         try:
+            ensure_config_dir()
             with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
                 _app_config_cache.write(configfile)
             print(f"INFO: Created default '{CONFIG_FILE_PATH}'.")
@@ -71,7 +87,7 @@ def load_all_configs():
             print(f"ERROR: Could not write default '{CONFIG_FILE_PATH}': {e}")
 
     # Load supported locales
-    _supported_locales_cache = configparser.ConfigParser()
+    _supported_locales_cache = configparser.ConfigParser(interpolation=None)
     if os.path.exists(SUPPORTED_LOCALES_FILE_PATH):
         _supported_locales_cache.read(SUPPORTED_LOCALES_FILE_PATH, encoding='utf-8')
     else:
@@ -502,21 +518,32 @@ def get_state_pixmap(member: 'Member', club: 'Club') -> QPixmap:
     return composite
 
 def upload_to_bucket(blob_name: str, data: bytes, content_type: str) -> str:
-    """Uploads data to GCS and returns the public URL."""
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = secret_manager.get_secret("credentials_json")
-    project_id = secret_manager.get_secret("project_id")
-    bucket_name = secret_manager.get_secret("bucket_name")
+    """Uploads data to GCS and returns the public URL.
 
-    if not all([project_id, bucket_name, secret_manager.get_secret("credentials_json")]):
-        print("GCS config missing (project_id, bucket_name, or credentials_json). Cannot upload.")
-        return None
-
-    storage = _get_storage_module()
-    client = storage.Client(project=project_id)
-    bucket = client.bucket(bucket_name)
-    
-    blob = bucket.blob(blob_name)
+    Never raises: any GCS/config failure (missing credentials, unreachable
+    network, etc.) is logged and reported as a failed upload (``None``) so a
+    broken cloud setup cannot crash an otherwise successful save.
+    """
+    bucket_name = None
     try:
+        credentials_json = secret_manager.get_secret("credentials_json")
+        project_id = secret_manager.get_secret("project_id")
+        bucket_name = secret_manager.get_secret("bucket_name")
+
+        if not all([project_id, bucket_name, credentials_json]):
+            print("GCS config missing (project_id, bucket_name, or credentials_json). Cannot upload.")
+            return None
+
+        credentials, error = resolve_gcs_credentials(credentials_json)
+        if error:
+            print(f"GCS credentials error: {error}")
+            return None
+
+        storage = _get_storage_module()
+        client = storage.Client(project=project_id, credentials=credentials)
+        bucket = client.bucket(bucket_name)
+
+        blob = bucket.blob(blob_name)
         blob.upload_from_string(data, content_type=content_type)
         blob.make_public() # Ensure the blob is publicly readable
         public_url = f"https://storage.googleapis.com/{bucket_name}/{blob_name}"
@@ -662,17 +689,26 @@ def save_app_settings(
     preferred_country_code: str,
     preferred_language: str,
     membership_currency: str,
-    membership_fee_normal: str, # Store as string, convert on use
-    membership_fee_discounted: str, # Store as string
-    membership_valid_until_month: str, # Store as string
-    membership_valid_until_day: str, # Store as string
-    membership_renewal_window_days: str, # Store as string
-    iban: str
+    membership_fee_normal: str,
+    membership_fee_discounted: str,
+    membership_valid_until_month: str,
+    membership_valid_until_day: str,
+    membership_renewal_window_days: str,
+    iban: str,
+    account_name: str = '',
+    payment_link_generator_name: str = '',
+    sticker_template_path: str = '',
+    sticker_text_color: str = '#FFFFFF',
+    sticker_bg_color: str = 'transparent',
+    wallet_class_id_suffix: str = '',
+    wallet_checker_url: str = '',
+    wallet_origin_domain: str = '',
+    predefined_certificates: list = None,
 ) -> bool:
     """Saves application settings to the config file."""
     global _app_config_cache
     if _app_config_cache is None:
-        load_all_configs() # Ensure config is loaded
+        load_all_configs()
 
     _app_config_cache['DEFAULT']['preferred_country'] = preferred_country_code.upper()
     _app_config_cache['DEFAULT']['preferred_language'] = preferred_language
@@ -683,8 +719,19 @@ def save_app_settings(
     _app_config_cache['DEFAULT']['membership_valid_until_day'] = membership_valid_until_day
     _app_config_cache['DEFAULT']['membership_renewal_window_days'] = membership_renewal_window_days
     _app_config_cache['DEFAULT']['iban'] = iban.strip().upper()
+    _app_config_cache['DEFAULT']['account_name'] = account_name.strip()
+    _app_config_cache['DEFAULT']['payment_link_generator'] = payment_link_generator_name
+    _app_config_cache['DEFAULT']['membership_sticker_template_path'] = sticker_template_path
+    _app_config_cache['DEFAULT']['membership_sticker_text_color'] = sticker_text_color
+    _app_config_cache['DEFAULT']['membership_sticker_bg_color'] = sticker_bg_color
+    _app_config_cache['DEFAULT']['wallet_class_id_suffix'] = wallet_class_id_suffix
+    _app_config_cache['DEFAULT']['wallet_checker_url'] = wallet_checker_url
+    _app_config_cache['DEFAULT']['wallet_origin_domain'] = wallet_origin_domain
+    if predefined_certificates is not None:
+        _app_config_cache['DEFAULT']['predefined_certificates'] = '|'.join(predefined_certificates)
 
     try:
+        ensure_config_dir()
         with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
             _app_config_cache.write(configfile)
         print(f"INFO: Application settings saved to '{CONFIG_FILE_PATH}'.")
@@ -744,3 +791,274 @@ def get_membership_renewal_window_days() -> int:
 def get_iban() -> str:
     if _app_config_cache is None: load_all_configs()
     return _app_config_cache.get('DEFAULT', 'iban', fallback='')
+
+def get_account_name() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'account_name', fallback='')
+
+def get_payment_link_generator_name() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'payment_link_generator', fallback='')
+
+def get_predefined_certificates() -> list:
+    """Returns list of predefined certificate names stored as pipe-separated string."""
+    if _app_config_cache is None: load_all_configs()
+    raw = _app_config_cache.get('DEFAULT', 'predefined_certificates', fallback='')
+    if not raw.strip():
+        return []
+    return [c.strip() for c in raw.split('|') if c.strip()]
+
+def get_membership_sticker_template_path() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'membership_sticker_template_path', fallback='')
+
+def get_membership_sticker_url() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'membership_sticker_url', fallback='')
+
+def set_membership_sticker_url(url: str):
+    """Persists the sticker GCS URL into config.properties."""
+    global _app_config_cache
+    if _app_config_cache is None: load_all_configs()
+    _app_config_cache['DEFAULT']['membership_sticker_url'] = url
+    try:
+        ensure_config_dir()
+        with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
+            _app_config_cache.write(configfile)
+    except IOError as e:
+        print(f"ERROR: Could not persist sticker URL: {e}")
+
+def get_membership_sticker_text_color() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'membership_sticker_text_color', fallback='#FFFFFF')
+
+def get_membership_sticker_bg_color() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'membership_sticker_bg_color', fallback='transparent')
+
+def get_membership_fee_year() -> int:
+    """Returns the current year as the year for which eCPs are issued."""
+    import datetime as _dt
+    return _dt.date.today().year
+
+def get_wallet_class_id_suffix() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'wallet_class_id_suffix', fallback='member')
+
+def get_wallet_checker_url() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'wallet_checker_url', fallback='')
+
+def get_wallet_origin_domain() -> str:
+    if _app_config_cache is None: load_all_configs()
+    return _app_config_cache.get('DEFAULT', 'wallet_origin_domain', fallback='')
+
+
+_sticker_logger = logging.getLogger(__name__)
+
+
+def generate_patch_from_template(source_image_data: bytes) -> bytes:
+    """
+    Generates a coloured patch from a grayscale template with procedural patterns.
+
+    The template must be a PNG with transparent background using these colours:
+    - #000000 (border)
+    - #606060 (lighter background)
+    - #404040 (darker background)
+    """
+    try:
+        from PIL import Image
+        from io import BytesIO
+        import numpy as np
+
+        template_img = Image.open(BytesIO(source_image_data)).convert("RGBA")
+        width, height = template_img.size
+        img_array = np.array(template_img)
+
+        border_hue = random.random()
+        bg_hue = (border_hue + 0.5) % 1.0
+
+        border_color_rgb = np.array(colorsys.hls_to_rgb(border_hue, 0.5, 1.0)) * 255
+        bg_color_1_rgb = np.array(colorsys.hls_to_rgb(bg_hue, 0.7, 0.45)) * 255
+        bg_color_2_rgb = np.array(colorsys.hls_to_rgb(bg_hue, 0.4, 0.35)) * 255
+
+        x = np.linspace(-np.pi, np.pi, width)
+        y = np.linspace(-np.pi, np.pi, height)
+        xx, yy = np.meshgrid(x, y)
+
+        angle1 = random.uniform(0, np.pi)
+        phase1 = random.uniform(0, 2 * np.pi)
+        freq1 = random.uniform(2.5, 4)
+        rotated_grid1 = (xx * np.cos(angle1) + yy * np.sin(angle1)) * freq1 + phase1
+        pattern1 = np.sin(rotated_grid1) * 0.15
+
+        angle2 = random.uniform(0, np.pi)
+        phase2 = random.uniform(0, 2 * np.pi)
+        freq2 = random.uniform(1.0, 1.5)
+        rotated_grid2 = (xx * np.cos(angle2) + yy * np.sin(angle2)) * freq2 + phase2
+        pattern2 = ((np.sin(rotated_grid2) + 1) / 2) * 0.25
+
+        new_img_array = np.zeros_like(img_array)
+
+        c_border = np.array([0, 0, 0])
+        c_bg1 = np.array([96, 96, 96])
+        c_bg2 = np.array([64, 64, 64])
+
+        mask_border = np.all(img_array[:, :, :3] == c_border, axis=-1)
+        mask_bg1 = np.all(img_array[:, :, :3] == c_bg1, axis=-1)
+        mask_bg2 = np.all(img_array[:, :, :3] == c_bg2, axis=-1)
+        mask_alpha = img_array[:, :, 3] > 0
+
+        if np.any(mask_border):
+            h, l, s = colorsys.rgb_to_hls(border_color_rgb[0]/255, border_color_rgb[1]/255, border_color_rgb[2]/255)
+            l_patterned = np.clip(l + pattern1[mask_border], 0.1, 0.9)
+            final_border_colors = np.array([colorsys.hls_to_rgb(h, l_val, s) for l_val in l_patterned]) * 255
+            new_img_array[mask_border, :3] = final_border_colors
+
+        if np.any(mask_bg1):
+            h, l, s = colorsys.rgb_to_hls(bg_color_1_rgb[0]/255, bg_color_1_rgb[1]/255, bg_color_1_rgb[2]/255)
+            l_patterned = np.clip(l + pattern2[mask_bg1], 0.1, 0.9)
+            final_bg1_colors = np.array([colorsys.hls_to_rgb(h, l_val, s) for l_val in l_patterned]) * 255
+            new_img_array[mask_bg1, :3] = final_bg1_colors
+
+        if np.any(mask_bg2):
+            h, l, s = colorsys.rgb_to_hls(bg_color_2_rgb[0]/255, bg_color_2_rgb[1]/255, bg_color_2_rgb[2]/255)
+            l_patterned = np.clip(l + pattern2[mask_bg2], 0.1, 0.9)
+            final_bg2_colors = np.array([colorsys.hls_to_rgb(h, l_val, s) for l_val in l_patterned]) * 255
+            new_img_array[mask_bg2, :3] = final_bg2_colors
+
+        new_img_array[mask_alpha, 3] = 255
+
+        result_img = Image.fromarray(new_img_array.astype('uint8'), 'RGBA')
+        from io import BytesIO as _BytesIO
+        buf = _BytesIO()
+        result_img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    except Exception as e:
+        _sticker_logger.error("Error generating patch from template: %s", e)
+        return None
+
+
+def _apply_pattern_to_text_image(text_image: QImage, base_color: QColor, is_outline: bool = False) -> QImage:
+    """
+    Applies a sinusoidal pattern to an existing text image.
+    Only recolours non-transparent pixels.
+    """
+    import numpy as np
+
+    width, height = text_image.width(), text_image.height()
+    if width == 0 or height == 0:
+        return text_image
+
+    h, s, l, a = base_color.getHslF()
+    if is_outline:
+        s = 0.10
+
+    x = np.linspace(-np.pi, np.pi, width)
+    y = np.linspace(-np.pi, np.pi, height)
+    xx, yy = np.meshgrid(x, y)
+
+    angle = random.uniform(0, np.pi)
+    phase = random.uniform(0, 2 * np.pi)
+    freq = random.uniform(1.5, 2.5)
+    rotated_grid = (xx * np.cos(angle) + yy * np.sin(angle)) * freq + phase
+    pattern = np.sin(rotated_grid) * 0.15
+
+    for r in range(height):
+        for c in range(width):
+            if text_image.pixelColor(c, r).alpha() > 0:
+                l_patterned = np.clip(l + pattern[r, c], 0.1, 0.9)
+                pattern_color = QColor.fromHslF(h, s, l_patterned, a)
+                text_image.setPixelColor(c, r, pattern_color)
+
+    return text_image
+
+
+def generate_membership_sticker(template_image_data: bytes, year_text: str) -> bytes:
+    """
+    Generates the complete membership sticker (500x120) from a template (256x256).
+    Creates a coloured patch, embeds it in the centre of a larger canvas and adds
+    the year text with a contrasting outline for readability.
+
+    :param template_image_data: Source template (256x256) as bytes.
+    :param year_text: Text (year) to display on the sticker.
+    :return: Final sticker image (500x120) as PNG bytes, or None on error.
+    """
+    try:
+        patch_data = generate_patch_from_template(template_image_data)
+        if not patch_data:
+            _sticker_logger.error("Failed to generate coloured patch from template.")
+            return None
+
+        patch_img = QImage()
+        patch_img.loadFromData(patch_data)
+
+        scaled_patch_img = patch_img.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+        final_width, final_height = 500, 120
+        sticker_img = QImage(final_width, final_height, QImage.Format_ARGB32)
+
+        bg_color_str = get_membership_sticker_bg_color()
+        bg_color = QColor(bg_color_str) if bg_color_str.lower() != 'transparent' else Qt.transparent
+        sticker_img.fill(bg_color)
+
+        patch_x = (final_width - scaled_patch_img.width()) // 2
+        patch_y = (final_height - scaled_patch_img.height()) // 2
+
+        painter = QPainter(sticker_img)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.drawImage(patch_x, patch_y, scaled_patch_img)
+
+        font = QFont("Arial", 80, QFont.Bold)
+        painter.setFont(font)
+
+        text_color = QColor(get_membership_sticker_text_color())
+        outline_base_color = QColor(
+            255 - text_color.red(),
+            255 - text_color.green(),
+            255 - text_color.blue(),
+        )
+        h, s, l, a = outline_base_color.getHslF()
+        s = 1.0
+        l = max(0, min(1, l * 0.2))
+        outline_color = QColor.fromHslF(h, s, l, a)
+
+        mid_index = len(year_text) // 2
+        year_part1 = year_text[:mid_index]
+        year_part2 = year_text[mid_index:]
+
+        metrics = painter.fontMetrics()
+        rect_part1 = metrics.boundingRect(year_part1)
+        rect_part2 = metrics.boundingRect(year_part2)
+
+        pos1_x = patch_x - rect_part1.width() - 10
+        pos1_y = (final_height - rect_part1.height()) // 2
+
+        pos2_x = patch_x + scaled_patch_img.width() + 10
+        pos2_y = (final_height - rect_part2.height()) // 2
+
+        def _draw_part(text_part, position, text_rect):
+            path = QPainterPath()
+            baseline_y = position.y() + text_rect.height() - metrics.descent()
+            path.addText(position.x(), baseline_y, font, text_part)
+            pen = QPen(outline_color, 3)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(QBrush(text_color))
+            painter.drawPath(path)
+
+        _draw_part(year_part1, QPoint(pos1_x, pos1_y), rect_part1)
+        _draw_part(year_part2, QPoint(pos2_x, pos2_y), rect_part2)
+
+        painter.end()
+
+        byte_array = QByteArray()
+        buffer = QBuffer(byte_array)
+        buffer.open(QIODevice.WriteOnly)
+        sticker_img.save(buffer, "PNG")
+        return bytes(byte_array)
+
+    except Exception as e:
+        _sticker_logger.error("Error generating membership sticker: %s", e)
+        return None

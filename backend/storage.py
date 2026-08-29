@@ -1,4 +1,4 @@
-import os
+from gcs_auth import resolve_gcs_credentials
 
 
 def make_gcs_upload_blob(get_secret):
@@ -9,10 +9,13 @@ def make_gcs_upload_blob(get_secret):
         if not all([credentials_json, project_id, bucket_name]):
             raise RuntimeError("GCS config missing: credentials_json, project_id, or bucket_name.")
 
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_json
+        credentials, error = resolve_gcs_credentials(credentials_json)
+        if error:
+            raise RuntimeError(f"GCS credentials error: {error}")
+
         from google.cloud import storage
 
-        client = storage.Client(project=project_id)
+        client = storage.Client(project=project_id, credentials=credentials)
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(blob_name)
         blob.upload_from_string(data, content_type=content_type)

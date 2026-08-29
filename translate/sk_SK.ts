@@ -1349,4 +1349,32 @@ Nastaviť členský poplatok ako zaplatený pre rok {current_year}?</translation
         <translation>Prosím, vyberte preferovanú krajinu.</translation>
     </message>
 </context>
+<context>
+    <name>PortraitCropDialog</name>
+    <message>
+        <location filename="../dialogs/portrait_crop_dialog.py" line="187"/>
+        <source>Crop Portrait Photo</source>
+        <translation>Orezanie portrétnej fotografie</translation>
+    </message>
+    <message>
+        <location filename="../dialogs/portrait_crop_dialog.py" line="198"/>
+        <source>Drag the frame to position it, use the slider or the mouse wheel to zoom. The frame keeps the proportions of the eCP card portrait.</source>
+        <translation>Rámček presuniete ťahaním myšou, veľkosť zmeníte posuvníkom alebo kolieskom myši. Rámček zachováva pomer strán portrétu na eCP preukaze.</translation>
+    </message>
+    <message>
+        <location filename="../dialogs/portrait_crop_dialog.py" line="220"/>
+        <source>Auto-crop to face</source>
+        <translation>Automaticky orezať na tvár</translation>
+    </message>
+    <message>
+        <location filename="../dialogs/portrait_crop_dialog.py" line="224"/>
+        <source>No face was detected in this photo.</source>
+        <translation>Na tejto fotografii nebola rozpoznaná žiadna tvár.</translation>
+    </message>
+    <message>
+        <location filename="../dialogs/portrait_crop_dialog.py" line="227"/>
+        <source>Center</source>
+        <translation>Na stred</translation>
+    </message>
+</context>
 </TS>

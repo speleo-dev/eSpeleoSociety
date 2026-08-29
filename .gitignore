@@ -1,14 +1,33 @@
 .venv/
 __pycache__/
 *.py[cod]
+
+# All user/machine-specific configuration lives here (secrets.properties,
+# config.properties, exported secrets). Never commit any of it.
+# NOTE: config/ must NOT contain an __init__.py - it would shadow config.py.
+/config/
+
 secrets.properties
+config.properties
 token
 temp.properties
 .env
 .env.*
 docs/projekt/
 
+# Tokens (NEVER commit these!)
+github-token.txt
+gitlab-token.txt
+
+# Plaintext secret exports produced by setup.py
+espeleo-secrets.txt
+espeleo-secrets.csv
+*-secrets.txt
+*-secrets.csv
+
 # Local agent/runtime artifacts
 /codex-session
 /os
 /sys
+graphify-out/
+build/

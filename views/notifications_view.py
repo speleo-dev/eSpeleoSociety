@@ -1,5 +1,7 @@
 import datetime
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit, QDateTimeEdit, QComboBox, QPushButton, QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
+from table_layout import ColumnSpec
+from ui_table import SortableItem, create_columns_button, install_table_features
 from utils import get_table_header_stylesheet, show_warning_message, show_success_message # Pridaný import
 from PyQt5.QtCore import Qt
 import db
@@ -34,25 +36,30 @@ class NotificationsView(QWidget):
         self.add_button = QPushButton(self.tr("Add Message"))
         self.add_button.clicked.connect(self.add_notification)
         btn_layout.addWidget(self.add_button)
+        btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
         # Tabuľka na zobrazenie notifikácií
         self.table = QTableWidget()
-        self.table.setColumnCount(5) # Creation Date, Message, Issued, Expired, Actions
-        self.table.setHorizontalHeaderLabels([self.tr("Creation Date"), self.tr("Message"), self.tr("Issued"), self.tr("Expired"), self.tr("Actions")])
-        
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # Creation Date
-        header.setSectionResizeMode(1, QHeaderView.Stretch) # Message
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Actions
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Issued
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Expired
-        header.setStretchLastSection(False)
-        header.setStyleSheet(get_table_header_stylesheet())
+        self.table_controller = install_table_features(
+            self.table,
+            "notifications",
+            [
+                ColumnSpec("created_at", self.tr("Creation Date"), width=140),
+                ColumnSpec("message", self.tr("Message"), width=360, essential=True, stretch=True),
+                ColumnSpec("valid_from", self.tr("Issued"), width=140),
+                ColumnSpec("valid_to", self.tr("Expired"), width=140),
+                ColumnSpec("actions", self.tr("Actions"), width=90, essential=True),
+            ],
+            parent=self,
+        )
+        btn_layout.addWidget(create_columns_button(self.table_controller, self))
+        self.table.horizontalHeader().setStyleSheet(get_table_header_stylesheet())
         layout.addWidget(self.table)
 
     def load_notifications(self):
         notifications = db.db_manager.fetch_notifications()
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(notifications))
         for row, notif in enumerate(notifications):
             notification_id = notif['notification_id']
@@ -60,10 +67,12 @@ class NotificationsView(QWidget):
             valid_from = notif['valid_from']
             valid_to = notif['valid_to']
 
-            self.table.setItem(row, 0, QTableWidgetItem(dt.strftime("%Y-%m-%d %H:%M")))
-            self.table.setItem(row, 1, QTableWidgetItem(notif['text']))
-            self.table.setItem(row, 2, QTableWidgetItem(valid_from.strftime("%Y-%m-%d %H:%M")))
-            self.table.setItem(row, 3, QTableWidgetItem(valid_to.strftime("%Y-%m-%d %H:%M")))
+            # Timestamps sort on the ISO value, not on the display format.
+            self.table.setItem(row, 0, SortableItem(dt.strftime("%Y-%m-%d %H:%M"), dt.isoformat()))
+            self.table.setItem(row, 1, SortableItem(notif['text']))
+            self.table.setItem(row, 2, SortableItem(valid_from.strftime("%Y-%m-%d %H:%M"), valid_from.isoformat()))
+            self.table.setItem(row, 3, SortableItem(valid_to.strftime("%Y-%m-%d %H:%M"), valid_to.isoformat()))
+            self.table.setItem(row, 4, SortableItem(""))
 
             # Pridanie tlačidla Akcie
             btn_delete = QPushButton(self.tr("Delete"))
@@ -71,6 +80,7 @@ class NotificationsView(QWidget):
             btn_delete.clicked.connect(lambda checked, notif_id=notification_id: self.delete_notification(notif_id))
             self.table.setCellWidget(row, 4, btn_delete)
 
+        self.table.setSortingEnabled(True)
         self.table.resizeRowsToContents() # Prispôsobenie výšky riadkov obsahu
 
     def add_notification(self):

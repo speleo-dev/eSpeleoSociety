@@ -8,22 +8,39 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from club_filtering import club_matches_filter
 import db
 from dialogs.club_management_dialog import ClubManagementDialog
+from table_layout import ColumnSpec
+from ui_table import SortableItem, create_columns_button, install_table_features
 from utils import get_table_header_stylesheet, show_error_message # Pridaný import
 
 
-CLUB_EDITABLE_COLUMNS = set(range(0, 9))
 ORIGINAL_VALUE_ROLE = Qt.UserRole
 CLUB_ID_ROLE = Qt.UserRole + 1
-SORT_VALUE_ROLE = Qt.UserRole + 2
+
+# Column identity is the stable key, not the position: the user may reorder or
+# hide columns and the persisted layout still has to line up.
+CLUB_EDITABLE_KEYS = {
+    "name", "street", "city", "zip_code", "country",
+    "email", "phone", "webpage", "president",
+}
 
 
-class SortableClubItem(QTableWidgetItem):
-    def __lt__(self, other):
-        left = self.data(SORT_VALUE_ROLE)
-        right = other.data(SORT_VALUE_ROLE)
-        if isinstance(left, int) and isinstance(right, int):
-            return left < right
-        return str(left or "").casefold() < str(right or "").casefold()
+def club_column_specs(tr):
+    """Declared columns. The address details are hidden by default so the table
+    fits on screen and the Actions button is reachable without scrolling; they
+    stay one click away in the Columns menu."""
+    return [
+        ColumnSpec("name", tr("Club Name"), width=240, essential=True, stretch=True),
+        ColumnSpec("street", tr("Street"), width=180, hidden=True),
+        ColumnSpec("city", tr("City"), width=140),
+        ColumnSpec("zip_code", tr("ZIP Code"), width=90, hidden=True),
+        ColumnSpec("country", tr("Country"), width=120, hidden=True),
+        ColumnSpec("email", tr("Email"), width=220),
+        ColumnSpec("phone", tr("Phone"), width=150, hidden=True),
+        ColumnSpec("webpage", tr("Webpage"), width=200, hidden=True),
+        ColumnSpec("president", tr("President"), width=180),
+        ColumnSpec("member_count", tr("Member Count"), width=110, numeric=True),
+        ColumnSpec("actions", tr("Actions"), width=90, essential=True),
+    ]
 
 
 class ClubsListView(QWidget):
@@ -35,8 +52,10 @@ class ClubsListView(QWidget):
         self.clubs = []
         self._clubs_by_id = {}
         self._loading = False
-        self._default_sort_applied = False
         self.init_ui()
+
+    def _column(self, key: str) -> int:
+        return self.table_controller.index_of(key)
 
     def init_ui(self):
         header_widget = QWidget()
@@ -53,126 +72,89 @@ class ClubsListView(QWidget):
         header_layout.addWidget(self.filter_edit)
         self.filter_status_label = QLabel("")
         header_layout.addWidget(self.filter_status_label)
-        btn_sort_az = QPushButton(self.tr("A-Z"))
-        btn_sort_az.setToolTip(self.tr("Sort clubs by name A-Z"))
-        btn_sort_az.clicked.connect(lambda: self.sort_by_club_name(Qt.AscendingOrder))
-        header_layout.addWidget(btn_sort_az)
-        btn_sort_za = QPushButton(self.tr("Z-A"))
-        btn_sort_za.setToolTip(self.tr("Sort clubs by name Z-A"))
-        btn_sort_za.clicked.connect(lambda: self.sort_by_club_name(Qt.DescendingOrder))
-        header_layout.addWidget(btn_sort_za)
         btn_new_club = QPushButton(self.tr("➕ Create New Club"))
         btn_new_club.clicked.connect(self.request_new_club_creation)
         header_layout.addWidget(btn_new_club)
         layout = QVBoxLayout(self)
         layout.addWidget(header_widget)
 
-        # Označenie reťazca pre preklad
-        #header = QLabel(self.tr("Zoznam klubov"))
-        #layout.addWidget(header)
-
         self.table = QTableWidget()
-        self.table.setColumnCount(11)
+        self.table_controller = install_table_features(
+            self.table, "clubs_list", club_column_specs(self.tr), parent=self
+        )
+        header_layout.insertWidget(
+            header_layout.count() - 1, create_columns_button(self.table_controller, header_widget)
+        )
         layout.addWidget(self.table)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.table.itemChanged.connect(self._handle_item_changed)
-        self.table.setSortingEnabled(True)
+        self.table.setStyleSheet("QTableWidget { font-size: 10pt; }")
+        self.table.horizontalHeader().setStyleSheet(get_table_header_stylesheet())
 
         self.load_data()
 
     def load_data(self):
         self._loading = True
-        sort_section = self.table.horizontalHeader().sortIndicatorSection()
-        sort_order = self.table.horizontalHeader().sortIndicatorOrder()
-        if not self._default_sort_applied:
-            sort_section = 0
-            sort_order = Qt.AscendingOrder
-            self._default_sort_applied = True
         self.table.setSortingEnabled(False)
         self.clubs = db.db_manager.fetch_clubs()
         self._clubs_by_id = {club.club_id: club for club in self.clubs}
         self.table.setRowCount(len(self.clubs))
-        self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.setWordWrap(False)
-        self.table.setStyleSheet("QTableWidget { font-size: 10pt; }")
-
-        self.table.setHorizontalHeaderLabels([
-            self.tr("Club Name"),
-            self.tr("Street"),
-            self.tr("City"),
-            self.tr("ZIP Code"),
-            self.tr("Country"),
-            self.tr("Email"),
-            self.tr("Phone"),
-            self.tr("Webpage"),
-            self.tr("President"),
-            self.tr("Member Count"),
-            self.tr("Actions"),
-        ])
-        
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch) # Club Name
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Street
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # City
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # ZIP Code
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Country
-        header.setSectionResizeMode(5, QHeaderView.Interactive) # Email
-        header.setSectionResizeMode(6, QHeaderView.Interactive) # Phone
-        header.setSectionResizeMode(7, QHeaderView.Interactive) # Webpage
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents) # President
-        header.setSectionResizeMode(9, QHeaderView.ResizeToContents) # Member Count
-        header.setSectionResizeMode(10, QHeaderView.ResizeToContents) # Actions
-        self.table.setColumnWidth(5, 230)
-        self.table.setColumnWidth(6, 170)
-        self.table.setColumnWidth(7, 230)
-        header.setStretchLastSection(False) # Posledný stĺpec vyplní zvyšok
-
-        
-        # Nastavenie tmavého štýlu pre hlavičku tabuľky
-        self.table.horizontalHeader().setStyleSheet(get_table_header_stylesheet())
-        self.table.horizontalHeader().setSortIndicatorShown(True)
-        self.table.setAlternatingRowColors(True)
 
         for row, club in enumerate(self.clubs):
-            self._set_text_item(row, 0, club.name, club_id=club.club_id)
-            self._set_text_item(row, 1, club.street, club_id=club.club_id)
-            self._set_text_item(row, 2, club.city, club_id=club.club_id)
-            self._set_text_item(row, 3, club.zip_code, club_id=club.club_id)
-            self._set_text_item(row, 4, club.country, club_id=club.club_id)
-            self._set_text_item(row, 5, club.email, club_id=club.club_id)
-            self._set_text_item(row, 6, club.phone, club_id=club.club_id)
-            self._set_text_item(row, 7, club.webpage, club_id=club.club_id)
-            self._set_text_item(row, 8, club.president_name, club_id=club.club_id)
-            self._set_text_item(row, 9, str(club.member_count), editable=False, club_id=club.club_id, sort_value=int(club.member_count or 0))
-            self._set_text_item(row, 10, "", editable=False, club_id=club.club_id)
+            self._set_text_item(row, "name", club.name, club_id=club.club_id)
+            self._set_text_item(row, "street", club.street, club_id=club.club_id)
+            self._set_text_item(row, "city", club.city, club_id=club.club_id)
+            self._set_text_item(row, "zip_code", club.zip_code, club_id=club.club_id)
+            self._set_text_item(row, "country", club.country, club_id=club.club_id)
+            self._set_text_item(row, "email", club.email, club_id=club.club_id)
+            self._set_text_item(row, "phone", club.phone, club_id=club.club_id)
+            self._set_text_item(row, "webpage", club.webpage, club_id=club.club_id)
+            self._set_text_item(row, "president", club.president_name, club_id=club.club_id)
+            self._set_text_item(
+                row, "member_count", str(club.member_count), editable=False,
+                club_id=club.club_id, sort_value=int(club.member_count or 0),
+            )
+            self._set_text_item(row, "actions", "", editable=False, club_id=club.club_id)
             btn_view = QPushButton(self.tr("View"))
             # Uistite sa, že lambda správne viaže aktuálnu hodnotu club['id']
             btn_view.clicked.connect(lambda checked, cid=club.club_id: self.show_members_list(cid))
-            self.table.setCellWidget(row, 10, btn_view)
+            self.table.setCellWidget(row, self._column("actions"), btn_view)
+
         self.table.setSortingEnabled(True)
-        if sort_section < 0 or sort_section >= self.table.columnCount():
-            sort_section = 0
-            sort_order = Qt.AscendingOrder
-        self.table.sortItems(sort_section, sort_order)
         self._loading = False
         self.apply_filter()
 
-    def _set_text_item(self, row: int, column: int, value, editable: bool = True, club_id=None, sort_value=None):
+    def showEvent(self, event: QShowEvent):
+        super().showEvent(event)
+        # Only once the widget has a real width can the stretch column be sized
+        # to fill it without leaving an empty strip on the right.
+        self.table_controller.expand_to_viewport()
+
+    def _set_text_item(self, row: int, key: str, value, editable: bool = True, club_id=None, sort_value=None):
+        column = self._column(key)
+        if column < 0:
+            return
         text = "" if value is None else str(value)
-        item = SortableClubItem(text)
+        item = SortableItem(text, sort_value)
         item.setToolTip(text)
         item.setData(ORIGINAL_VALUE_ROLE, text)
         item.setData(CLUB_ID_ROLE, club_id)
-        item.setData(SORT_VALUE_ROLE, text if sort_value is None else sort_value)
         flags = item.flags()
-        if editable and column in CLUB_EDITABLE_COLUMNS:
+        if editable and key in CLUB_EDITABLE_KEYS:
             item.setFlags(flags | Qt.ItemIsEditable)
         else:
             item.setFlags(flags & ~Qt.ItemIsEditable)
         self.table.setItem(row, column, item)
 
+    def _key_for_column(self, column: int):
+        specs = self.table_controller.specs
+        if 0 <= column < len(specs):
+            return specs[column].key
+        return None
+
     def _handle_item_changed(self, item: QTableWidgetItem):
-        if self._loading or item.column() not in CLUB_EDITABLE_COLUMNS:
+        key = self._key_for_column(item.column())
+        if self._loading or key not in CLUB_EDITABLE_KEYS:
             return
         club_id = item.data(CLUB_ID_ROLE)
         club = self._clubs_by_id.get(club_id)
@@ -185,10 +167,10 @@ class ClubsListView(QWidget):
             return
 
         try:
-            self._apply_club_edit(club, item.column(), new_value)
+            self._apply_club_edit(club, key, new_value)
             db.db_manager.update_club(club)
             item.setData(ORIGINAL_VALUE_ROLE, new_value)
-            item.setData(SORT_VALUE_ROLE, new_value)
+            item.setData(SortableItem.SORT_ROLE, new_value)
             item.setToolTip(new_value)
             self.apply_filter()
         except Exception as exc:
@@ -197,34 +179,34 @@ class ClubsListView(QWidget):
             self._loading = False
             show_error_message(self.tr("Failed to save club value: ") + str(exc))
 
-    def _apply_club_edit(self, club, column: int, value: str):
-        if column == 0:
+    def _apply_club_edit(self, club, key: str, value: str):
+        if key == "name":
             if not value:
                 raise ValueError(self.tr("Club name cannot be empty."))
             club.name = value
-        elif column == 1:
+        elif key == "street":
             club.street = value
-        elif column == 2:
+        elif key == "city":
             club.city = value
-        elif column == 3:
+        elif key == "zip_code":
             club.zip_code = value
-        elif column == 4:
+        elif key == "country":
             club.country = value
-        elif column == 5:
+        elif key == "email":
             club.email = value
-        elif column == 6:
+        elif key == "phone":
             club.phone = value
-        elif column == 7:
+        elif key == "webpage":
             club.webpage = value
-        elif column == 8:
+        elif key == "president":
             club.president_name = value
             club.president_name_text = value
 
     def sort_by_club_name(self, order):
-        self.table.sortItems(0, order)
+        self.table.sortItems(self._column("name"), order)
 
     def _club_for_row(self, row: int):
-        item = self.table.item(row, 0)
+        item = self.table.item(row, self._column("name"))
         if item is None:
             return None
         return self._clubs_by_id.get(item.data(CLUB_ID_ROLE))

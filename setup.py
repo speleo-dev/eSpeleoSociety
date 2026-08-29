@@ -1,10 +1,14 @@
+import json
 import os
 from PyQt5.QtWidgets import ( QApplication,
-    QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout,
-    QComboBox, QFormLayout, QMessageBox, QDialog, QDialogButtonBox, QGridLayout
+    QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
+    QComboBox, QFormLayout, QMessageBox, QDialog, QDialogButtonBox, QGridLayout,
+    QFileDialog, QScrollArea, QInputDialog,
 ) # Add QFont
 from PyQt5.QtCore import Qt, QTimer
 from config import secret_manager # Import the global secret_manager
+from app_paths import ensure_config_dir
+from secrets_export import write_secrets_export
 from PyQt5.QtGui import QIcon
 
 SECRET_SETUP_FIELDS = [
@@ -28,13 +32,21 @@ SECRET_SETUP_FIELDS = [
     ("log_level", "Log level:"),
     ("ecp_signing_key_id", "eCP signing key ID:"),
     ("ecp_signing_private_key_b64", "eCP signing private key (base64 PEM):"),
+    ("ftp_host", "FTP Host:"),
+    ("ftp_port", "FTP Port:"),
+    ("ftp_user", "FTP User:"),
+    ("ftp_password", "FTP Password:"),
+    ("ftp_base_dir", "FTP Base directory:"),
+    ("ftp_use_tls", "FTP Use TLS (true/false):"),
 ]
 
 SENSITIVE_SECRET_FIELDS = {
     "db_password",
+    "credentials_json",
     "crypt_key",
     "ecp_signing_private_key_b64",
     "smtp_password",
+    "ftp_password",
 }
 
 class PinDialog(QDialog):
@@ -142,9 +154,9 @@ class SecretSetupGUI(QWidget):
         super().__init__()
         self.setWindowTitle(self.tr("Secrets Setup"))
         self.secrets = {}
-        self.entries = {} # Window enlargement
-        self.setFixedSize(900, 720)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
+        self.entries = {}
+        self.resize(1000, 820)
+        self.setMinimumSize(750, 500)
 
         icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Adjust path if necessary
         if os.path.exists(icon_path):
@@ -153,34 +165,205 @@ class SecretSetupGUI(QWidget):
         self.create_widgets()
 
     def create_widgets(self):
-        layout = QVBoxLayout()
-        grid = QGridLayout()
-        layout.addLayout(grid)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(12)
 
-        row = 0
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.NoFrame)
+
+        content_widget = QWidget()
+        form_layout = QFormLayout(content_widget)
+        form_layout.setContentsMargins(15, 12, 15, 12)
+        form_layout.setHorizontalSpacing(18)
+        form_layout.setVerticalSpacing(8)
+        form_layout.setLabelAlignment(Qt.AlignLeft)
+        form_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
         for key, label_text in SECRET_SETUP_FIELDS:
             label = QLabel(label_text)
+            label.setMinimumWidth(260)
             if key == "log_level":
                 entry = QComboBox()
                 entry.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
-                entry.setMinimumWidth(500)
+                entry.setFixedHeight(30)
+                form_layout.addRow(label, entry)
             else:
                 entry = QLineEdit()
-                entry.setFixedHeight(32) # Increase field height
-                entry.setMinimumWidth(500) # Adjust minimum field width
+                entry.setFixedHeight(30)
                 entry.setAlignment(Qt.AlignLeft)
                 if key in SENSITIVE_SECRET_FIELDS:
                     entry.setEchoMode(QLineEdit.Password)
-            grid.addWidget(label, row, 0)
-            grid.addWidget(entry, row, 1)
+                if key == "credentials_json":
+                    entry.setMinimumWidth(300)
+                    field_row = QHBoxLayout()
+                    field_row.setSpacing(8)
+                    field_row.addWidget(entry)
+                    browse_button = QPushButton(self.tr("Import JSON key file..."))
+                    browse_button.setFixedHeight(30)
+                    browse_button.clicked.connect(self.import_credentials_json)
+                    field_row.addWidget(browse_button)
+                    form_layout.addRow(label, field_row)
+                else:
+                    form_layout.addRow(label, entry)
             self.entries[key] = entry
-            row += 1
+
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area)
+
+        bottom_bar = QHBoxLayout()
+        bottom_bar.addStretch()
+
+        self.export_button = QPushButton(self.tr("Export to TXT/CSV..."))
+        self.export_button.setFixedHeight(36)
+        self.export_button.setToolTip(
+            self.tr("Exports all values, including the masked ones, in plaintext. Requires the PIN again.")
+        )
+        self.export_button.clicked.connect(self.export_secrets)
+        bottom_bar.addWidget(self.export_button)
 
         self.save_button = QPushButton(self.tr("Save"))
+        self.save_button.setFixedHeight(36)
+        self.save_button.setMinimumWidth(130)
         self.save_button.clicked.connect(self.save_secrets)
-        layout.addWidget(self.save_button)
+        bottom_bar.addWidget(self.save_button)
 
-        self.setLayout(layout)
+        main_layout.addLayout(bottom_bar)
+
+    def _collect_entry_values(self):
+        return {key: self._get_entry_value(entry) for key, entry in self.entries.items()}
+
+    def _reauthenticate(self):
+        """Ask for the PIN again before revealing masked values.
+
+        Verification does not touch secret_manager.secrets, so unsaved edits in
+        the form survive. Returns True when the user proved knowledge of the PIN.
+        """
+        if not os.path.exists(secret_manager.properties_file):
+            QMessageBox.warning(
+                self,
+                self.tr("Warning"),
+                self.tr("Save the secrets first - there is no encrypted file to verify the PIN against."),
+            )
+            return False
+
+        pin, accepted = QInputDialog.getText(
+            self,
+            self.tr("Confirm PIN"),
+            self.tr("Enter the PIN again to export secrets in plaintext:"),
+            QLineEdit.Password,
+        )
+        if not accepted:
+            return False
+
+        if not secret_manager.verify_pin(pin):
+            QMessageBox.critical(self, self.tr("Error"), self.tr("Incorrect PIN!"))
+            return False
+        return True
+
+    def export_secrets(self):
+        """Export every configured value - masked fields included - to TXT/CSV."""
+        if not self._reauthenticate():
+            return
+
+        confirm = QMessageBox.warning(
+            self,
+            self.tr("Plaintext export"),
+            self.tr(
+                "The exported file will contain passwords, private keys and API "
+                "credentials in plaintext.\n\nStore it securely, never commit it, "
+                "and delete it when you no longer need it.\n\nContinue?"
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        filename, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            self.tr("Export secrets"),
+            os.path.join(ensure_config_dir(), "espeleo-secrets.txt"),
+            self.tr("Text file (*.txt);;CSV file (*.csv)"),
+        )
+        if not filename:
+            return
+
+        export_format = "csv" if "csv" in selected_filter.lower() else "txt"
+        if not os.path.splitext(filename)[1]:
+            filename = f"{filename}.{export_format}"
+        elif os.path.splitext(filename)[1].lower() == ".csv":
+            export_format = "csv"
+        elif os.path.splitext(filename)[1].lower() == ".txt":
+            export_format = "txt"
+
+        try:
+            write_secrets_export(
+                filename,
+                self._collect_entry_values(),
+                SECRET_SETUP_FIELDS,
+                export_format,
+            )
+        except OSError as exc:
+            QMessageBox.critical(
+                self,
+                self.tr("Error"),
+                self.tr("Could not write the export file: %s") % exc,
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            self.tr("Exported"),
+            self.tr("Secrets were exported to:\n%s\n\nThe file is readable only by your user account.")
+            % filename,
+        )
+
+    def import_credentials_json(self):
+        """Import a GCP service account key file so its content lives inside
+        the encrypted secrets.properties instead of relying on an external
+        file path that can go missing on another machine."""
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Select GCP service account JSON key"),
+            "",
+            self.tr("JSON files (*.json)"),
+        )
+        if not filename:
+            return
+
+        try:
+            with open(filename, "r", encoding="utf-8") as key_file:
+                content = key_file.read()
+            parsed = json.loads(content)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(
+                self,
+                self.tr("Error"),
+                self.tr("Could not read a valid JSON key file: %s") % exc,
+            )
+            return
+
+        if parsed.get("type") != "service_account":
+            QMessageBox.warning(
+                self,
+                self.tr("Warning"),
+                self.tr(
+                    "This does not look like a GCP service account key "
+                    "(missing \"type\": \"service_account\"). It was imported anyway; "
+                    "double-check the file if uploads keep failing."
+                ),
+            )
+
+        self.entries["credentials_json"].setText(json.dumps(parsed))
+        if "project_id" in parsed and not self.entries["project_id"].text():
+            self.entries["project_id"].setText(parsed["project_id"])
+        QMessageBox.information(
+            self,
+            self.tr("Imported"),
+            self.tr("The key content was loaded. Click Save to store it encrypted."),
+        )
 
     def load_secrets(self):
         if secret_manager.secrets:
@@ -244,7 +427,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     default_font = QFont()
-    default_font.setPointSize(11) # Set a larger font size (e.g., 11pt)
+    default_font.setPointSize(9) # Match standard application font size (9pt)
     app.setFont(default_font)
 
     # Attempt to load and decrypt existing secrets if the file exists

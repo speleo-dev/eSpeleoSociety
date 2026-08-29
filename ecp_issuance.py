@@ -139,14 +139,31 @@ def issue_signed_ecp_qr(
         legal_documents=legal_documents,
     )
     payload = sign_ecp_claim(claim, private_key_pem, key_id=key_id)
-    qr_data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    
+    # Offline verifiable human-readable text + verification link
+    display_name = member_display_name(member) or "Člen SSS"
+    club_name = getattr(club, "name", "") or claim.get("club_name", "") or "Bez klubu"
+    valid_until_str = valid_until.isoformat() if hasattr(valid_until, "isoformat") else str(valid_until)
+    member_id_str = str(getattr(member, "member_id", ""))
+    
+    qr_lines = [
+        "SSS eCP PREUKAZ",
+        f"Meno: {display_name}",
+        f"ID: {member_id_str}",
+        f"Klub: {club_name}",
+        f"Platnost: {valid_until_str}",
+    ]
+    if verification_url:
+        qr_lines.append(f"Overenie: {verification_url}")
+    qr_data = "\n".join(qr_lines)
+
     blob_hash = ecp_hash or f"member-{getattr(member, 'member_id')}"
     return IssuedSignedEcpQr(
         payload=payload,
         qr_data=qr_data,
         qr_png=_qr_png_bytes(qr_data),
         blob_name=f"ecp_qr/{blob_hash}.png",
-        payload_hash=hashlib.sha256(qr_data.encode("utf-8")).hexdigest(),
+        payload_hash=hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest(),
         key_id=key_id,
         issued_at=issued_at,
         valid_until=valid_until,
@@ -233,7 +250,11 @@ def issue_and_upload_ecp_delivery_bundle(
     if not bucket_name:
         raise EcpSigningConfigError("Missing bucket_name secret for eCP verification page URL.")
 
+    ftp_host = (get_secret("ftp_host") or "").strip()
     public_verification_base_url = (get_secret("ecp_verification_base_url") or "").strip()
+    if not public_verification_base_url and ftp_host:
+        public_verification_base_url = "https://ecp.sss.sk/v"
+
     verification_path_prefix = "v" if public_verification_base_url else "ecp_verify"
     verification_blob_name = _verification_blob_name(ecp_hash, path_prefix=verification_path_prefix)
     verification_url = _verification_url(bucket_name, verification_blob_name, public_verification_base_url)
@@ -271,14 +292,19 @@ def issue_and_upload_ecp_delivery_bundle(
         issued_qr=issued_qr,
         portrait_image=portrait_image,
     )
-    card_image_blob_name = f"ecp_cards/{ecp_hash}.jpg"
-    card_pdf_blob_name = f"ecp_cards/{ecp_hash}.pdf"
-    card_image_url = upload_blob(card_image_blob_name, card_image, "image/jpeg")
-    if not card_image_url:
-        raise EcpQrUploadError("eCP card JPG upload failed.")
-    card_pdf_url = upload_blob(card_pdf_blob_name, card_pdf, "application/pdf")
-    if not card_pdf_url:
-        raise EcpQrUploadError("eCP card PDF upload failed.")
+    card_image_blob_name = f"v/cards/{ecp_hash}.jpg" if ftp_host else f"ecp_cards/{ecp_hash}.jpg"
+    card_pdf_blob_name = f"v/cards/{ecp_hash}.pdf" if ftp_host else f"ecp_cards/{ecp_hash}.pdf"
+
+    if ftp_host:
+        card_image_url = f"{public_verification_base_url.rstrip('/')}/cards/{ecp_hash}.jpg"
+        card_pdf_url = f"{public_verification_base_url.rstrip('/')}/cards/{ecp_hash}.pdf"
+    else:
+        card_image_url = upload_blob(card_image_blob_name, card_image, "image/jpeg")
+        if not card_image_url:
+            raise EcpQrUploadError("eCP card JPG upload failed.")
+        card_pdf_url = upload_blob(card_pdf_blob_name, card_pdf, "application/pdf")
+        if not card_pdf_url:
+            raise EcpQrUploadError("eCP card PDF upload failed.")
 
     verification_html = build_verification_page_html(
         member=member,
@@ -291,7 +317,16 @@ def issue_and_upload_ecp_delivery_bundle(
         legal_document_url=legal_document_url,
     )
     verification_webroot = (get_secret("ecp_verification_webroot") or "").strip()
-    if verification_webroot:
+    if ftp_host:
+        from ftp_uploader import upload_files_to_ftp_batch
+        files_to_upload = [
+            (card_image_blob_name, card_image),
+            (card_pdf_blob_name, card_pdf),
+            (verification_blob_name, verification_html),
+        ]
+        upload_files_to_ftp_batch(files_to_upload, get_secret)
+        uploaded_verification_url = verification_url
+    elif verification_webroot:
         uploaded_verification_url = _write_verification_html_to_webroot(
             verification_webroot,
             verification_blob_name,

@@ -1,11 +1,13 @@
 # views/member_search_view.py
 from typing import List
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QDialog
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QDialog
 from PyQt5.QtCore import Qt, QTimer # Pridaný import QTimer
 import db
 from dialogs.member_management_dialog import MemberManagementDialog # Import pre dialóg
 from model import Member, Club # Import modelov
 from member_search_filter import member_matches_fast_search
+from table_layout import ColumnSpec
+from ui_table import SortableItem, create_columns_button, install_table_features
 from utils import get_state_pixmap, get_table_header_stylesheet, show_warning_message # Pridaný import pre ikony stavu
 
 
@@ -44,20 +46,24 @@ class MemberSearchView(QWidget):
         # layout.addWidget(self.search_button)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(5) # Stav, Celé meno, Primárny klub, Email, Akcie
-        self.table.setHorizontalHeaderLabels([self.tr("Status"), self.tr("Full Name"), self.tr("Primary Club"), self.tr("Email"), self.tr("Actions")])
-        
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # Status
-        header.setSectionResizeMode(1, QHeaderView.Stretch) # Full Name
-        header.setSectionResizeMode(2, QHeaderView.Stretch) # Primary Club
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Email
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Actions
-        header.setStretchLastSection(False)
+        self.table_controller = install_table_features(
+            self.table,
+            "member_search",
+            [
+                ColumnSpec("status", self.tr("Status"), width=80, essential=True),
+                ColumnSpec("full_name", self.tr("Full Name"), width=240, essential=True, stretch=True),
+                ColumnSpec("primary_club", self.tr("Primary Club"), width=220),
+                ColumnSpec("email", self.tr("Email"), width=220),
+                ColumnSpec("actions", self.tr("Actions"), width=90, essential=True),
+            ],
+            parent=self,
+        )
+        columns_row = QHBoxLayout()
+        columns_row.addStretch()
+        columns_row.addWidget(create_columns_button(self.table_controller, self))
+        layout.addLayout(columns_row)
 
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setWordWrap(False)
-        header.setStyleSheet(get_table_header_stylesheet()) # Použitie funkcie z utils
+        self.table.horizontalHeader().setStyleSheet(get_table_header_stylesheet()) # Použitie funkcie z utils
         self.table.setStyleSheet("QTableWidget { font-size: 10pt; }")
         layout.addWidget(self.table)
 
@@ -134,6 +140,7 @@ class MemberSearchView(QWidget):
         else:
             self.status_label.setText(self.tr(f"Showing {len(self.visible_members)} of {len(self.all_members)} members."))
 
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         self.table.setRowCount(len(self.visible_members))
         for row, member_obj in enumerate(self.visible_members):
@@ -143,6 +150,9 @@ class MemberSearchView(QWidget):
                 primary_club_obj = self.clubs_by_id.get(member_obj.primary_club_id) # Use translated attribute
 
             # 1. Stĺpec: Stav (ikona)
+            # An item is always set behind the icon widget so the column still
+            # has a defined sort value.
+            self.table.setItem(row, 0, SortableItem("", member_obj.status or ""))
             if primary_club_obj:
                 pixmap = get_state_pixmap(member_obj, primary_club_obj)
                 status_label = QLabel()
@@ -150,23 +160,26 @@ class MemberSearchView(QWidget):
                 status_label.setAlignment(Qt.AlignCenter)
                 self.table.setCellWidget(row, 0, status_label)
             else:
-                self.table.setItem(row, 0, QTableWidgetItem("N/A")) # Ak klub nie je nájdený
+                self.table.setCellWidget(row, 0, None)
+                self.table.setItem(row, 0, SortableItem("N/A")) # Ak klub nie je nájdený
 
             # 2. Stĺpec: Celé meno
             full_name = " ".join(filter(None, [member_obj.title_prefix, member_obj.first_name, member_obj.last_name, member_obj.title_suffix]))
-            self.table.setItem(row, 1, QTableWidgetItem(full_name))
+            self.table.setItem(row, 1, SortableItem(full_name))
 
             # 3. Stĺpec: Primárny klub
             club_name = primary_club_obj.name if primary_club_obj else (member_obj.primary_club_name or self.tr("Unassigned"))
-            self.table.setItem(row, 2, QTableWidgetItem(club_name))
+            self.table.setItem(row, 2, SortableItem(club_name))
 
             # 4. Stĺpec: Email
-            self.table.setItem(row, 3, QTableWidgetItem(member_obj.email))
+            self.table.setItem(row, 3, SortableItem(member_obj.email or ""))
 
             # 5. Stĺpec: Akcie (tlačidlo Spravovať)
+            self.table.setItem(row, 4, SortableItem(""))
             btn_manage = QPushButton(self.tr("Manage"))
             btn_manage.clicked.connect(lambda checked, m=member_obj: self.open_member_management_dialog(m))
             self.table.setCellWidget(row, 4, btn_manage)
+        self.table.setSortingEnabled(True)
         self.table.resizeRowsToContents()
 
     def open_member_management_dialog(self, member: Member):

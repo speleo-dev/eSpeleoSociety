@@ -2,6 +2,7 @@ FORMS    =
 SOURCES  = main.py \
            utils.py \
            setup.py \
+           ui_table.py \
            navigation_panel.py \
            views/clubs_list_view.py \
            views/ecp_requests_view.py \
@@ -14,5 +15,6 @@ SOURCES  = main.py \
            dialogs/club_management_dialog.py \
            dialogs/ecp_approval_dialog.py \
            dialogs/ecp_issuance_dialog.py \
-           dialogs/member_management_dialog.py
+           dialogs/member_management_dialog.py \
+           dialogs/portrait_crop_dialog.py
 TRANSLATIONS = translate/sk_SK.ts translate/en_US.ts

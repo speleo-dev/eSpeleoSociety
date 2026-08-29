@@ -4,7 +4,7 @@ import re
 from contextlib import contextmanager
 from config import secret_manager
 from typing import List
-from model import Club, Membership, Ecp, EcpRequest, Member # EcpRequest model might need photo_hash
+from model import Club, Membership, Ecp, EcpRequest, Member, Certificate
 import datetime # Added import
 
 SENSITIVE_LOG_KEYS = (
@@ -1227,6 +1227,84 @@ class DatabaseManager:
         query = "DELETE FROM ecp_records WHERE ecp_record_id = %s;"
         self._execute(query, (ecp_record_id,))
         self._log_action("DELETE", "ecp_records", "Deleted eCP record")
+
+    # --- Certificate Methods ---
+
+    def fetch_certificates_by_member(self, member_id: int) -> List['Certificate']:
+        """Fetch all certificates for a given member, ordered by sequence number."""
+        query = """
+        SELECT member_id, sequence_number, name, issue_date, valid_until, url
+        FROM member_certificates
+        WHERE member_id = %s
+        ORDER BY sequence_number ASC;
+        """
+        rows = self._fetch_all(query, (member_id,))
+        return [
+            Certificate(
+                member_id=_row_get(r, 'member_id', 0),
+                sequence_number=_row_get(r, 'sequence_number', 1),
+                name=_row_get(r, 'name', 2),
+                issue_date=_row_get(r, 'issue_date', 3),
+                valid_until=_row_get(r, 'valid_until', 4),
+                url=_row_get(r, 'url', 5),
+            )
+            for r in rows
+        ]
+
+    def insert_certificate(self, cert: 'Certificate'):
+        """Insert a new certificate record for a member."""
+        query = """
+        INSERT INTO member_certificates
+            (member_id, sequence_number, name, issue_date, valid_until, url)
+        VALUES (%s, %s, %s, %s, %s, %s);
+        """
+        params = (
+            cert.member_id,
+            cert.sequence_number,
+            cert.name,
+            cert.issue_date,
+            cert.valid_until,
+            cert.url,
+        )
+        self._execute(query, params)
+        self._log_action(
+            "INSERT", "member_certificates",
+            f"Inserted certificate '{cert.name}' for member_id={cert.member_id}"
+        )
+
+    def update_certificate(self, cert: 'Certificate'):
+        """Update an existing certificate record (identified by member_id + sequence_number)."""
+        query = """
+        UPDATE member_certificates
+        SET name = %s, issue_date = %s, valid_until = %s, url = %s
+        WHERE member_id = %s AND sequence_number = %s;
+        """
+        params = (
+            cert.name,
+            cert.issue_date,
+            cert.valid_until,
+            cert.url,
+            cert.member_id,
+            cert.sequence_number,
+        )
+        self._execute(query, params)
+        self._log_action(
+            "UPDATE", "member_certificates",
+            f"Updated certificate seq={cert.sequence_number} for member_id={cert.member_id}"
+        )
+
+    def delete_certificate(self, member_id: int, sequence_number: int):
+        """Delete a specific certificate by member_id and sequence_number."""
+        query = """
+        DELETE FROM member_certificates
+        WHERE member_id = %s AND sequence_number = %s;
+        """
+        self._execute(query, (member_id, sequence_number))
+        self._log_action(
+            "DELETE", "member_certificates",
+            f"Deleted certificate seq={sequence_number} for member_id={member_id}"
+        )
+
 
 # Global instance, if needed
 db_manager: DatabaseManager = None

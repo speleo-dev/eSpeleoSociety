@@ -21,6 +21,11 @@ class SetupSecretsTest(unittest.TestCase):
             "smtp_user",
             "smtp_password",
             "log_level",
+            "ftp_host",
+            "ftp_port",
+            "ftp_user",
+            "ftp_password",
+            "ftp_base_dir",
         ]
         for field in expected_fields:
             with self.subTest(field=field):
@@ -28,6 +33,7 @@ class SetupSecretsTest(unittest.TestCase):
 
         self.assertIn('"db_password"', source)
         self.assertIn('"smtp_password"', source)
+        self.assertIn('"ftp_password"', source)
         self.assertIn("SENSITIVE_SECRET_FIELDS", source)
 
 

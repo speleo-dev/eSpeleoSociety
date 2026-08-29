@@ -3,6 +3,17 @@
 -- Keeps at most one primary club per member and one fee row per
 -- member/year/fee_type. Existing duplicate rows are collapsed before indexes
 -- are created so the migration can run on current data.
+--
+-- Rollback: the index creation is reversible with
+--   DROP INDEX IF EXISTS public.idx_club_affiliations_one_primary;
+--   DROP INDEX IF EXISTS public.idx_club_affiliations_club_id;
+--   DROP INDEX IF EXISTS public.idx_membership_fees_member_year_type;
+-- The duplicate collapsing is NOT reversible - it deletes duplicate
+-- membership_fees rows and clears surplus is_primary_club flags. Take a backup
+-- before applying. The whole file runs in one transaction, so a failure rolls
+-- back both the data changes and the indexes.
+
+BEGIN;
 
 WITH ranked_primary AS (
     SELECT
@@ -41,3 +52,5 @@ CREATE INDEX IF NOT EXISTS idx_club_affiliations_club_id
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_membership_fees_member_year_type
     ON public.membership_fees USING btree (member_id, year, fee_type);
+
+COMMIT;

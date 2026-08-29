@@ -14,6 +14,8 @@ from email_notifications import EmailNotificationError, send_ecp_issued_email
 from model import Member, Club
 from dialogs.member_management_dialog import MemberManagementDialog 
 from inline_editing import parse_address_text, parse_full_name, parse_optional_date
+from table_layout import ColumnSpec
+from ui_table import create_columns_button, install_table_features
 from utils import get_state_pixmap, _get_scaled_pixmap_from_cache, load_image_from_url, get_table_header_stylesheet, show_warning_message, show_info_message, show_success_message, show_error_message # Added import
 from views.editing_delegates import ComboBoxDelegate
 
@@ -22,6 +24,9 @@ MAX_MEMBERS_LIST_LOGO_HEIGHT = 100
 MEMBER_STATUSES = ["applicant", "active", "inactive", "blocked"]
 MEMBER_ROLES = ["member", "president"]
 MEMBER_EDITABLE_COLUMNS = set(range(0, 9))
+# Rows are no longer a stable identity once the table can be sorted, so each
+# cell records which member it belongs to.
+MEMBER_ID_ROLE = Qt.UserRole + 1
 
 class MembersListView(QWidget):
     def __init__(self, parent_window=None, parent=None):
@@ -29,6 +34,7 @@ class MembersListView(QWidget):
         self.parent_window = parent_window
         self.current_club: Club = None
         self.members: List[Member] = []
+        self._members_by_id = {}
         self._loading = False
         #self.table = QTableWidget() # We define the table as a class attribute
         self.init_ui()
@@ -109,41 +115,39 @@ class MembersListView(QWidget):
         # === End of new header ===
 
         self.table = QTableWidget()
-        self.table.setColumnCount(10)
-        self.table.setHorizontalHeaderLabels([
-            self.tr("Status"), self.tr("Role"), self.tr("Title"), self.tr("Full Name"),
-            "", self.tr("Birth Date"), self.tr("Address"), 
-            self.tr("Phone"), self.tr("Email"), self.tr("Actions")
-        ])
+        # Same column order as before, so every logical index used below is
+        # unchanged; only the header behaviour becomes user-adjustable.
+        self.table_controller = install_table_features(
+            self.table,
+            "members_list",
+            [
+                ColumnSpec("status", self.tr("Status"), width=80, essential=True),
+                ColumnSpec("role", self.tr("Role"), width=90),
+                ColumnSpec("title", self.tr("Title"), width=70, hidden=True),
+                ColumnSpec("full_name", self.tr("Full Name"), width=220, essential=True, stretch=True),
+                ColumnSpec("title_suffix", self.tr("Title suffix"), width=70, hidden=True),
+                ColumnSpec("birth_date", self.tr("Birth Date"), width=110),
+                ColumnSpec("address", self.tr("Address"), width=260, hidden=True),
+                ColumnSpec("phone", self.tr("Phone"), width=140, hidden=True),
+                ColumnSpec("email", self.tr("Email"), width=220),
+                ColumnSpec("actions", self.tr("Actions"), width=90, essential=True),
+            ],
+            parent=self,
+        )
 
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # Status
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Role
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Title
-        header.setSectionResizeMode(3, QHeaderView.Stretch) # Full Name
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # "" (Title Suffix)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Birth Date
-        header.setSectionResizeMode(6, QHeaderView.Stretch) # Address
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents) # Phone
-        header.setSectionResizeMode(8, QHeaderView.ResizeToContents) # Email
-        header.setSectionResizeMode(9, QHeaderView.ResizeToContents) # Actions
-        header.setStretchLastSection(False)
-
-        self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.setWordWrap(False)
         header.setStyleSheet(get_table_header_stylesheet())
         self.table.setStyleSheet("QTableWidget { font-size: 8pt; }")
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.table.setItemDelegateForColumn(0, ComboBoxDelegate(MEMBER_STATUSES, self.table))
         self.table.setItemDelegateForColumn(1, ComboBoxDelegate(MEMBER_ROLES, self.table))
         self.table.itemChanged.connect(self._handle_item_changed)
-        self.table.setAlternatingRowColors(True)
 
         layout.addWidget(self.table)
 
         # Buttons below the table
         button_layout = QHBoxLayout()
+        button_layout.addWidget(create_columns_button(self.table_controller, self))
         # Pridanie tlačidla "Mass Fee Update"
         btn_mass_fee_update = QPushButton(self.tr("Mass Fee Update"))
         btn_mass_fee_update.clicked.connect(self.mass_fee_update_members)
@@ -171,6 +175,8 @@ class MembersListView(QWidget):
         if not club:
             self.club_details_label.setText(self.tr("No club selected."))
             self.table.setRowCount(0)
+            self.members = []
+            self._members_by_id = {}
             self.btn_manage_club.setEnabled(False)
             self._loading = False
             return
@@ -207,22 +213,27 @@ class MembersListView(QWidget):
             self.club_logo_preview_label.setFixedSize(MAX_MEMBERS_LIST_LOGO_WIDTH, MAX_MEMBERS_LIST_LOGO_HEIGHT) # Reset na placeholder
 
         self.members: List[Member] = db.db_manager.fetch_members(club.club_id)
+        self._members_by_id = {member.member_id: member for member in self.members}
+        # Sorting must be off while filling: otherwise rows reshuffle between
+        # setItem calls and cells end up on the wrong member.
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(self.members))
 
         for row, member_obj in enumerate(self.members):
+            mid = member_obj.member_id
             try:
                 pixmap = get_state_pixmap(member_obj, self.current_club)
-                self._set_text_item(row, 0, member_obj.status or "", icon=QIcon(pixmap))
+                self._set_text_item(row, 0, member_obj.status or "", icon=QIcon(pixmap), member_id=mid)
             except Exception as e:
                 print(f"Error loading state pixmap for member {member_obj.first_name}: {e}") # Use translated attribute
-                self._set_text_item(row, 0, member_obj.status or "") # Use translated attribute
+                self._set_text_item(row, 0, member_obj.status or "", member_id=mid) # Use translated attribute
 
             role_text = "president" if member_obj.is_president else "member"
-            self._set_text_item(row, 1, role_text)
-            self._set_text_item(row, 2, member_obj.title_prefix or "")
-            self._set_text_item(row, 3, f"{member_obj.first_name} {member_obj.last_name}")
-            self._set_text_item(row, 4, member_obj.title_suffix or "")
-            self._set_text_item(row, 5, str(member_obj.birth_date) if member_obj.birth_date else "") # Uses property
+            self._set_text_item(row, 1, role_text, member_id=mid)
+            self._set_text_item(row, 2, member_obj.title_prefix or "", member_id=mid)
+            self._set_text_item(row, 3, f"{member_obj.first_name} {member_obj.last_name}", member_id=mid)
+            self._set_text_item(row, 4, member_obj.title_suffix or "", member_id=mid)
+            self._set_text_item(row, 5, str(member_obj.birth_date) if member_obj.birth_date else "", member_id=mid) # Uses property
             address_parts = [
                 member_obj.street,
                 member_obj.city,
@@ -230,22 +241,25 @@ class MembersListView(QWidget):
                 member_obj.country
             ]
             full_address = ", ".join(part for part in address_parts if part and part.strip())
-            self._set_text_item(row, 6, full_address)
-            self._set_text_item(row, 7, member_obj.phone or "")
-            self._set_text_item(row, 8, member_obj.email or "")
-            
+            self._set_text_item(row, 6, full_address, member_id=mid)
+            self._set_text_item(row, 7, member_obj.phone or "", member_id=mid)
+            self._set_text_item(row, 8, member_obj.email or "", member_id=mid)
+            self._set_text_item(row, 9, "", member_id=mid)
+
             btn_manage = QPushButton(self.tr("Manage"))
             btn_manage.clicked.connect(lambda checked, m=member_obj: self.open_member_management_dialog(m))
             self.table.setCellWidget(row, 9, btn_manage)
+        self.table.setSortingEnabled(True)
         self._loading = False
-        
-        #self.table.resizeColumnsToContents()
 
-    def _set_text_item(self, row: int, column: int, value, icon: QIcon = None):
+    def _set_text_item(self, row: int, column: int, value, icon: QIcon = None, member_id=None):
         text = "" if value is None else str(value)
         item = QTableWidgetItem(icon, text) if icon else QTableWidgetItem(text)
         item.setToolTip(text)
         item.setData(Qt.UserRole, text)
+        # The row index is not a stable identity once the table is sortable, so
+        # every cell carries the member it belongs to.
+        item.setData(MEMBER_ID_ROLE, member_id)
         flags = item.flags()
         if column in MEMBER_EDITABLE_COLUMNS:
             item.setFlags(flags | Qt.ItemIsEditable)
@@ -253,13 +267,26 @@ class MembersListView(QWidget):
             item.setFlags(flags & ~Qt.ItemIsEditable)
         self.table.setItem(row, column, item)
 
+    def _member_for_row(self, row: int):
+        """Member displayed in ``row``, valid after any sort or reorder."""
+        for column in range(self.table.columnCount()):
+            item = self.table.item(row, column)
+            if item is None:
+                continue
+            member = self._members_by_id.get(item.data(MEMBER_ID_ROLE))
+            if member is not None:
+                return member
+        return None
+
     def _handle_item_changed(self, item: QTableWidgetItem):
         if self._loading or item.column() not in MEMBER_EDITABLE_COLUMNS:
             return
-        if item.row() >= len(self.members) or not self.current_club:
+        if not self.current_club:
             return
 
-        member = self.members[item.row()]
+        member = self._members_by_id.get(item.data(MEMBER_ID_ROLE))
+        if member is None:
+            return
         old_value = item.data(Qt.UserRole) or ""
         new_value = item.text().strip()
         if new_value == old_value:
@@ -352,15 +379,27 @@ class MembersListView(QWidget):
     def add_new_member(self):
         self.open_member_management_dialog(member=None, is_new=True)
 
+    def _selected_members(self):
+        """Members for the currently selected rows, resolved by identity."""
+        selection = self.table.selectionModel()
+        if selection is None:
+            return []
+        members = []
+        for index in selection.selectedRows():
+            member = self._member_for_row(index.row())
+            if member is not None and member not in members:
+                members.append(member)
+        return members
+
     def mass_fee_update_members(self):
-        selected_indexes = self.table.selectionModel().selectedRows()
-        if not selected_indexes:
+        selected_members = self._selected_members()
+        if not selected_members:
             show_info_message(self.tr("You have not selected any members."))
             return
-        
-        count = len(selected_indexes)
+
+        count = len(selected_members)
         current_year = db.datetime.datetime.now().year
-        member_names = [f"{self.members[index.row()].first_name} {self.members[index.row()].last_name}" for index in selected_indexes]
+        member_names = [f"{member.first_name} {member.last_name}" for member in selected_members]
         member_names_str = ", ".join(member_names)
         
         reply = QMessageBox.question(self, self.tr("Confirmation"),
@@ -368,20 +407,19 @@ class MembersListView(QWidget):
                                     QMessageBox.Yes | QMessageBox.No)
 
         if reply == QMessageBox.Yes:
-            for index in selected_indexes:
-                member: Member = self.members[index.row()]
+            for member in selected_members:
                 member.set_paid_fee() # The set_paid_fee method already handles the current year and DB write
             show_success_message(self.tr("Fees have been set for the selected members."))
             self.load_data_for_club(self.current_club) # Refresh the list
 
     def mass_send_ecp_cards(self):
-        selected_indexes = self.table.selectionModel().selectedRows()
-        if not selected_indexes:
+        selected_members = self._selected_members()
+        if not selected_members:
             show_info_message(self.tr("You have not selected any members."))
             return
 
-        count = len(selected_indexes)
-        member_names = [f"{self.members[index.row()].first_name} {self.members[index.row()].last_name}" for index in selected_indexes]
+        count = len(selected_members)
+        member_names = [f"{member.first_name} {member.last_name}" for member in selected_members]
         member_names_str = ", ".join(member_names)
         reply = QMessageBox.question(
             self,
@@ -395,8 +433,7 @@ class MembersListView(QWidget):
         sent_count = 0
         skipped = []
         failed = []
-        for index in selected_indexes:
-            member: Member = self.members[index.row()]
+        for member in selected_members:
             display_name = f"{member.first_name} {member.last_name}".strip()
             if not member.email:
                 skipped.append(f"{display_name}: missing email")

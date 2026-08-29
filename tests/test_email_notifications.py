@@ -78,7 +78,7 @@ class EmailNotificationsTest(unittest.TestCase):
         self.assertEqual(message["To"], "ada@example.org")
         self.assertEqual(message["From"], "issuer@example.org")
         self.assertIn("eCP", message["Subject"])
-        body = message.get_content()
+        body = message.get_body(preferencelist=("plain",)).get_content()
         self.assertIn("Ada Lovelace", body)
         self.assertIn("2027-06-28", body)
 

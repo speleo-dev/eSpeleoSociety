@@ -2,10 +2,12 @@
 from datetime import datetime
 from decimal import Decimal
 from PyQt5.QtWidgets import ( 
-    QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt5.QtGui import QColor
+from table_layout import ColumnSpec
+from ui_table import SortableItem, create_columns_button, install_table_features
 from utils import parse_camt053, get_table_header_stylesheet, get_iban, get_membership_fee_normal, get_membership_fee_discounted, show_info_message, show_warning_message, show_error_message, show_success_message, encrypt_fee_reference
 from sepa_processing import process_transactions
 import db # Potrebujeme pre prístup k databáze
@@ -24,23 +26,27 @@ class SepaImportView(QWidget):
         
         self.import_button = QPushButton(self.tr("Select XML File"))
         self.import_button.clicked.connect(self.open_file_dialog)
-        layout.addWidget(self.import_button)
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.import_button)
+        button_row.addStretch()
+        layout.addLayout(button_row)
         
         # Tabuľka na zobrazenie výsledkov
         self.table = QTableWidget()
-        self.table.setColumnCount(5) # ECP Hash, Name / Payer IBAN, Amount, Currency, Payment Date
-        self.table.setHorizontalHeaderLabels([
-            self.tr("ECP Hash"), self.tr("Name / Payer IBAN"),
-            self.tr("Amount"), self.tr("Currency"), self.tr("Payment Date")
-        ])
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # ECP Hash
-        header.setSectionResizeMode(1, QHeaderView.Stretch) # Name / Payer IBAN
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Amount
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Currency
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Payment Date
-        header.setStretchLastSection(False)
-        header.setStyleSheet(get_table_header_stylesheet())
+        self.table_controller = install_table_features(
+            self.table,
+            "sepa_import",
+            [
+                ColumnSpec("ecp_hash", self.tr("ECP Hash"), width=160, essential=True),
+                ColumnSpec("name_or_iban", self.tr("Name / Payer IBAN"), width=300, essential=True, stretch=True),
+                ColumnSpec("amount", self.tr("Amount"), width=100, numeric=True),
+                ColumnSpec("currency", self.tr("Currency"), width=90),
+                ColumnSpec("payment_date", self.tr("Payment Date"), width=130),
+            ],
+            parent=self,
+        )
+        button_row.addWidget(create_columns_button(self.table_controller, self))
+        self.table.horizontalHeader().setStyleSheet(get_table_header_stylesheet())
         layout.addWidget(self.table)
         
         # Tlačidlo pre uloženie platieb
@@ -111,17 +117,25 @@ class SepaImportView(QWidget):
             show_info_message(self.tr("No valid payments found to save."))
         
     def display_results(self, processed_transactions: list):
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(0) 
         if not processed_transactions:
+            self.table.setSortingEnabled(True)
             return
         self.table.setRowCount(len(processed_transactions))
 
         for row_idx, tx_info in enumerate(processed_transactions):
-            ecp_item = QTableWidgetItem(tx_info['ecp_hash_display'])
-            name_iban_item = QTableWidgetItem(tx_info['name_or_iban'])
-            amount_item = QTableWidgetItem(f"{tx_info['amount']:.2f}") # Formátovanie na 2 desatinné miesta
-            currency_item = QTableWidgetItem(tx_info['currency'])
-            date_item = QTableWidgetItem(tx_info['payment_date'])
+            amount = tx_info['amount']
+            try:
+                amount_sort = float(amount)
+            except (TypeError, ValueError):
+                amount_sort = 0.0
+            ecp_item = SortableItem(tx_info['ecp_hash_display'])
+            name_iban_item = SortableItem(tx_info['name_or_iban'])
+            # Amounts must sort numerically: "9.00" > "10.00" as plain text.
+            amount_item = SortableItem(f"{amount:.2f}", amount_sort)
+            currency_item = SortableItem(tx_info['currency'])
+            date_item = SortableItem(tx_info['payment_date'])
 
             items = [ecp_item, name_iban_item, amount_item, currency_item, date_item]
 
@@ -130,7 +144,7 @@ class SepaImportView(QWidget):
                 item.setForeground(QColor(tx_info['text_color']))
                 self.table.setItem(row_idx, col_idx, item)
         
-        self.table.resizeColumnsToContents()
+        self.table.setSortingEnabled(True)
         self.table.resizeRowsToContents()
 
     def showEvent(self, event):
