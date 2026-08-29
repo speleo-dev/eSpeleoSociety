@@ -3,7 +3,7 @@ import os
 from PyQt5.QtWidgets import ( QApplication,
     QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout,
     QComboBox, QFormLayout, QMessageBox, QDialog, QDialogButtonBox, QGridLayout,
-    QFileDialog, QInputDialog,
+    QFileDialog, QScrollArea, QInputDialog,
 ) # Add QFont
 from PyQt5.QtCore import Qt, QTimer
 from config import secret_manager # Import the global secret_manager
@@ -154,9 +154,9 @@ class SecretSetupGUI(QWidget):
         super().__init__()
         self.setWindowTitle(self.tr("Secrets Setup"))
         self.secrets = {}
-        self.entries = {} # Window enlargement
-        self.setFixedSize(900, 720)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
+        self.entries = {}
+        self.resize(1000, 820)
+        self.setMinimumSize(750, 500)
 
         icon_path = os.path.join(os.path.dirname(__file__), "icons", "Logo_sss.ico")  # Adjust path if necessary
         if os.path.exists(icon_path):
@@ -165,58 +165,71 @@ class SecretSetupGUI(QWidget):
         self.create_widgets()
 
     def create_widgets(self):
-        layout = QVBoxLayout()
-        grid = QGridLayout()
-        layout.addLayout(grid)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(12)
 
-        row = 0
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.NoFrame)
+
+        content_widget = QWidget()
+        form_layout = QFormLayout(content_widget)
+        form_layout.setContentsMargins(15, 12, 15, 12)
+        form_layout.setHorizontalSpacing(18)
+        form_layout.setVerticalSpacing(8)
+        form_layout.setLabelAlignment(Qt.AlignLeft)
+        form_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
         for key, label_text in SECRET_SETUP_FIELDS:
             label = QLabel(label_text)
+            label.setMinimumWidth(260)
             if key == "log_level":
                 entry = QComboBox()
                 entry.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
-                entry.setMinimumWidth(500)
-                grid.addWidget(label, row, 0)
-                grid.addWidget(entry, row, 1)
+                entry.setFixedHeight(30)
+                form_layout.addRow(label, entry)
             else:
                 entry = QLineEdit()
-                entry.setFixedHeight(32) # Increase field height
-                entry.setMinimumWidth(500) # Adjust minimum field width
+                entry.setFixedHeight(30)
                 entry.setAlignment(Qt.AlignLeft)
                 if key in SENSITIVE_SECRET_FIELDS:
                     entry.setEchoMode(QLineEdit.Password)
-                grid.addWidget(label, row, 0)
                 if key == "credentials_json":
-                    # Leave room for the import button inside the same grid column.
                     entry.setMinimumWidth(300)
                     field_row = QHBoxLayout()
-                    field_row.setContentsMargins(0, 0, 0, 0)
+                    field_row.setSpacing(8)
                     field_row.addWidget(entry)
                     browse_button = QPushButton(self.tr("Import JSON key file..."))
-                    browse_button.setFixedHeight(32)
+                    browse_button.setFixedHeight(30)
                     browse_button.clicked.connect(self.import_credentials_json)
                     field_row.addWidget(browse_button)
-                    grid.addLayout(field_row, row, 1)
+                    form_layout.addRow(label, field_row)
                 else:
-                    grid.addWidget(entry, row, 1)
+                    form_layout.addRow(label, entry)
             self.entries[key] = entry
-            row += 1
 
-        self.save_button = QPushButton(self.tr("Save"))
-        self.save_button.clicked.connect(self.save_secrets)
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area)
+
+        bottom_bar = QHBoxLayout()
+        bottom_bar.addStretch()
 
         self.export_button = QPushButton(self.tr("Export to TXT/CSV..."))
+        self.export_button.setFixedHeight(36)
         self.export_button.setToolTip(
             self.tr("Exports all values, including the masked ones, in plaintext. Requires the PIN again.")
         )
         self.export_button.clicked.connect(self.export_secrets)
+        bottom_bar.addWidget(self.export_button)
 
-        button_row = QHBoxLayout()
-        button_row.addWidget(self.save_button)
-        button_row.addWidget(self.export_button)
-        layout.addLayout(button_row)
+        self.save_button = QPushButton(self.tr("Save"))
+        self.save_button.setFixedHeight(36)
+        self.save_button.setMinimumWidth(130)
+        self.save_button.clicked.connect(self.save_secrets)
+        bottom_bar.addWidget(self.save_button)
 
-        self.setLayout(layout)
+        main_layout.addLayout(bottom_bar)
 
     def _collect_entry_values(self):
         return {key: self._get_entry_value(entry) for key, entry in self.entries.items()}
@@ -414,7 +427,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     default_font = QFont()
-    default_font.setPointSize(11) # Set a larger font size (e.g., 11pt)
+    default_font.setPointSize(9) # Match standard application font size (9pt)
     app.setFont(default_font)
 
     # Attempt to load and decrypt existing secrets if the file exists

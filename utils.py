@@ -50,7 +50,7 @@ def load_all_configs():
     global _app_config_cache, _supported_locales_cache
     
     # Load app config
-    _app_config_cache = configparser.ConfigParser()
+    _app_config_cache = configparser.ConfigParser(interpolation=None)
     if os.path.exists(CONFIG_FILE_PATH):
         _app_config_cache.read(CONFIG_FILE_PATH, encoding='utf-8')
     else:
@@ -74,7 +74,7 @@ def load_all_configs():
             print(f"ERROR: Could not write default '{CONFIG_FILE_PATH}': {e}")
 
     # Load supported locales
-    _supported_locales_cache = configparser.ConfigParser()
+    _supported_locales_cache = configparser.ConfigParser(interpolation=None)
     if os.path.exists(SUPPORTED_LOCALES_FILE_PATH):
         _supported_locales_cache.read(SUPPORTED_LOCALES_FILE_PATH, encoding='utf-8')
     else:

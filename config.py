@@ -40,7 +40,7 @@ class SecretManager:
         decrypted_data = self.decrypt(encrypted_data, key)
 
         # Load decrypted data into configparser
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)
         config.read_string(decrypted_data.decode("utf-8"))
 
         return dict(config.items("DEFAULT")), salt
@@ -99,7 +99,7 @@ class SecretManager:
             key = self.derive_key(pin, self.salt)
 
             # Create configparser object and add secrets
-            config = configparser.ConfigParser()
+            config = configparser.ConfigParser(interpolation=None)
             config["DEFAULT"] = secrets
 
             # Serialize configparser to an in-memory buffer so plaintext
@@ -136,19 +136,21 @@ class SecretManager:
         ciphertext = encryptor.update(padded_data) + encryptor.finalize()
         combined = iv + ciphertext
         return combined
-    
+
     def get_logo_url(self): # Name is already English
         return f"https://storage.googleapis.com/{self.secrets.get('bucket_name')}/{self.secrets.get('logo_pic')}"
+
 
 # Function to quickly get the language without initializing the entire application
 def get_preferred_language():
     """Reads preferred language directly from config file for early app setup."""
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(interpolation=None)
     app_config_path = resolve_config_file(APP_CONFIG_FILENAME)
     if os.path.exists(app_config_path):
         config.read(app_config_path, encoding='utf-8')
         return config.get('DEFAULT', 'preferred_language', fallback='en_US')
     return 'en_US' # Fallback if the file does not exist
+
 
 # Create a global instance of SecretManager
 secret_manager = SecretManager()

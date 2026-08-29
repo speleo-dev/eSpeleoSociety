@@ -76,6 +76,7 @@ class WriteSecretsExportTest(unittest.TestCase):
     def _path(self, name):
         return os.path.join(self.temp_dir, name)
 
+    @unittest.skipIf(os.name == "nt", "POSIX file mode 0o600 is not supported on Windows")
     def test_file_is_owner_readable_only(self):
         path = self._path("out.txt")
         write_secrets_export(path, {"db_password": "x"}, FIELDS)
