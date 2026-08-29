@@ -3,14 +3,15 @@ import os, copy, datetime
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QFormLayout,
     QComboBox, QCheckBox, QListWidget, QListWidgetItem, QPushButton,
-    QMessageBox, QInputDialog, QDateEdit, QFileDialog
+    QMessageBox, QInputDialog, QDateEdit, QFileDialog,
+    QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QPixmap, QIcon
 import db
 from face_detection import prepare_portrait_upload
 from dialogs.portrait_crop_dialog import PortraitCropDialog
-from model import Club, Member
+from model import Club, Member, Certificate
 from utils import (
     get_state_pixmap, get_icon, load_image_from_url, show_warning_message,
     show_info_message, show_success_message, show_error_message, upload_to_bucket
@@ -171,6 +172,39 @@ class MemberManagementDialog(QDialog):
         clubs_section_layout.addLayout(btns_layout)
         layout.addLayout(clubs_section_layout)
         self.update_member_clubs_list()
+
+        # --- Certificates section (existing members only) ---
+        if not self.is_new and self.member.member_id is not None:
+            self.certificates = db.db_manager.fetch_certificates_by_member(self.member.member_id)
+        else:
+            self.certificates = []
+        certs_section_layout = QHBoxLayout()
+        self.table_certificates = QTableWidget()
+        self.table_certificates.setColumnCount(4)
+        self.table_certificates.setHorizontalHeaderLabels([
+            self.tr("Name"),
+            self.tr("Issue Date"),
+            self.tr("Valid Until"),
+            self.tr("URL"),
+        ])
+        self.table_certificates.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table_certificates.horizontalHeader().setStyleSheet(utils.get_table_header_stylesheet())
+        self.table_certificates.setEnabled(False)
+        certs_section_layout.addWidget(self.table_certificates)
+        certs_btns_layout = QVBoxLayout()
+        self.btn_add_certificate = QPushButton(self.tr("➕ Add Certificate"))
+        self.btn_add_certificate.clicked.connect(self._add_certificate_row)
+        self.btn_add_certificate.setEnabled(False)
+        self.btn_remove_certificate = QPushButton(self.tr("➖ Remove Certificate"))
+        self.btn_remove_certificate.clicked.connect(self._remove_certificate_row)
+        self.btn_remove_certificate.setEnabled(False)
+        certs_btns_layout.addWidget(self.btn_add_certificate)
+        certs_btns_layout.addWidget(self.btn_remove_certificate)
+        certs_btns_layout.addStretch()
+        certs_section_layout.addLayout(certs_btns_layout)
+        layout.addLayout(certs_section_layout)
+        self._load_certificates_to_table()
+
         btn_layout = QHBoxLayout()
         self.btn_edit = QPushButton(self.tr("Edit"))
         self.btn_edit.clicked.connect(self.toggle_edit_mode)
@@ -294,6 +328,10 @@ class MemberManagementDialog(QDialog):
         self.btn_edit.setVisible(True)
         self.btn_save.setVisible(False)
         self.edit_mode = False
+        # Certificates
+        self.table_certificates.setEnabled(False)
+        self.btn_add_certificate.setEnabled(False)
+        self.btn_remove_certificate.setEnabled(False)
 
     def unlock_fields(self):
         self.le_title_prefix.setReadOnly(False)
@@ -327,6 +365,11 @@ class MemberManagementDialog(QDialog):
         self.chk_is_president.setEnabled(False)
         self.btn_load_portrait.setEnabled(True)
         self.edit_mode = True
+        # Certificates (available only when editing existing member)
+        if not self.is_new and self.member.member_id is not None:
+            self.table_certificates.setEnabled(True)
+            self.btn_add_certificate.setEnabled(True)
+            self.btn_remove_certificate.setEnabled(True)
 
     def load_existing_portrait_preview(self):
         portrait_url = getattr(self.member, "portrait_url", None)
@@ -540,3 +583,67 @@ class MemberManagementDialog(QDialog):
                  self.btn_issue_ecp.setToolTip(self.tr("Member must have an email address specified."))
             else:
                  self.btn_issue_ecp.setToolTip("")
+
+    # --- Certificate helpers ---
+
+    def _load_certificates_to_table(self):
+        """Populates the certificate table from self.certificates."""
+        self.table_certificates.setRowCount(0)
+        for cert in self.certificates:
+            row = self.table_certificates.rowCount()
+            self.table_certificates.insertRow(row)
+            self.table_certificates.setItem(row, 0, QTableWidgetItem(cert.name or ""))
+            issue_str = cert.issue_date.strftime("%Y-%m-%d") if cert.issue_date else ""
+            self.table_certificates.setItem(row, 1, QTableWidgetItem(issue_str))
+            valid_str = cert.valid_until.strftime("%Y-%m-%d") if cert.valid_until else ""
+            self.table_certificates.setItem(row, 2, QTableWidgetItem(valid_str))
+            self.table_certificates.setItem(row, 3, QTableWidgetItem(cert.url or ""))
+
+    def _add_certificate_row(self):
+        """Adds a blank certificate row to the table and inserts it into the database."""
+        if not self.member or not self.member.member_id:
+            return
+        # Determine next sequence number
+        existing_seqs = [c.sequence_number for c in self.certificates]
+        next_seq = max(existing_seqs, default=0) + 1
+        predefined = utils.get_predefined_certificates()
+        cert_name, ok = QInputDialog.getItem(
+            self,
+            self.tr("Select Certificate"),
+            self.tr("Certificate type:"),
+            predefined or [self.tr("Other")],
+            editable=True,
+        ) if predefined else QInputDialog.getText(
+            self, self.tr("Certificate Name"), self.tr("Enter certificate name:")
+        )
+        if not ok or not cert_name.strip():
+            return
+        import datetime
+        new_cert = Certificate(
+            member_id=self.member.member_id,
+            sequence_number=next_seq,
+            name=cert_name.strip(),
+            issue_date=datetime.date.today(),
+            valid_until=None,
+            url=None,
+        )
+        db.db_manager.insert_certificate(new_cert)
+        self.certificates.append(new_cert)
+        self._load_certificates_to_table()
+
+    def _remove_certificate_row(self):
+        """Removes the selected certificate from the table and the database."""
+        current_row = self.table_certificates.currentRow()
+        if current_row < 0 or current_row >= len(self.certificates):
+            return
+        cert = self.certificates[current_row]
+        reply = QMessageBox.question(
+            self,
+            self.tr("Confirm Removal"),
+            self.tr(f"Remove certificate '{cert.name}'?"),
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            db.db_manager.delete_certificate(cert.member_id, cert.sequence_number)
+            self.certificates.pop(current_row)
+            self._load_certificates_to_table()

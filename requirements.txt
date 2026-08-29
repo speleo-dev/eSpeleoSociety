@@ -11,3 +11,4 @@ requests
 # which breaks portrait face detection (see face_detection.py).
 opencv-python-headless<5
 PyJWT
+numpy
